@@ -1,0 +1,78 @@
+name: "Terraform GitOps CI/CD"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform Action to execute"
+        required: true
+        default: "apply"
+        type: choice
+        options:
+          - apply
+          - destroy
+
+permissions:
+  id-token: write # Required for requesting the OIDC JWT token from GitHub
+  contents: read  # Required for actions/checkout to read repo contents
+
+jobs:
+  terraform:
+    name: "Terraform Plan & Apply"
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout repository code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Inspect OIDC Token Claims (Debug)
+      - name: Inspect OIDC Token Claims
+        run: |
+          TOKEN=$(curl -sLS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" -H "User-Agent: actions/runner" -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}")
+          JWT=$(echo $TOKEN | jq -r '.value')
+          echo "=== Decoded OIDC JWT Payload ==="
+          echo $JWT | cut -d. -f2 | base64 -d 2>/dev/null | jq '{iss, aud, sub, repository, repository_owner, ref, event_name}'
+
+      # 3. Authenticate to AWS via OIDC (Zero Static Keys!)
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::538820337783:role/GitHubActionsTerraformRole
+          aws-region: ap-south-1
+          audience: sts.amazonaws.com
+
+      # 4. Setup Terraform CLI on the runner
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.0
+
+      # 5. Initialize Terraform against Remote S3 Backend + DynamoDB Lock
+      - name: Terraform Init
+        run: terraform init
+
+      # 6. Validate HCL Syntax
+      - name: Terraform Validate
+        run: terraform validate
+
+      # 7. Generate Execution Plan (Only if NOT destroy)
+      - name: Terraform Plan
+        if: github.event.inputs.action != 'destroy'
+        run: terraform plan -no-color
+
+      # 8. Apply Changes Automatically (On Push to Main or Dispatch Apply)
+      - name: Terraform Apply
+        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+        run: terraform apply -auto-approve
+
+      # 9. Destroy Infrastructure on Demand (Only on Explicit Dispatch Destroy)
+      - name: Terraform Destroy
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+        run: terraform destroy -auto-approve
