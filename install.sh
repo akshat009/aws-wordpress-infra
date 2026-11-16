@@ -79,19 +79,15 @@ sed -i "s/username_here/${DB_USER}/" wp-config.php
 sed -i "s/password_here/${DB_PASS}/" wp-config.php
 sed -i "s/localhost/${DB_HOST}/" wp-config.php
 
-# 11. Enable Dynamic Domain & Reverse Proxy Support for ALB and Custom Domain
-cat << 'EOF' >> /var/www/html/wp-config.php
-
-// Reverse Proxy & Dynamic Host Configuration (ALB & Custom Domain)
-if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
-    $_SERVER['HTTPS'] = 'on';
-}
-if (isset($_SERVER['HTTP_HOST'])) {
-    $http_protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https://' : 'http://';
-    define('WP_HOME', $http_protocol . $_SERVER['HTTP_HOST']);
-    define('WP_SITEURL', $http_protocol . $_SERVER['HTTP_HOST']);
-}
-EOF
+# 11. Enable Reverse Proxy & Custom Domain Support (Must be placed before wp-settings.php)
+DOMAIN_NAME="${DOMAIN_NAME:-lab.asaxenadev.com}"
+sed -i "/require_once.*wp-settings.php/i \\
+if (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO']) && \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {\\
+    \$_SERVER['HTTPS'] = 'on';\\
+}\\
+define('WP_HOME', 'https://${DOMAIN_NAME}');\\
+define('WP_SITEURL', 'https://${DOMAIN_NAME}');\\
+" /var/www/html/wp-config.php
 
 # Apply production permissions
 chown -R www-data:www-data /var/www/html
