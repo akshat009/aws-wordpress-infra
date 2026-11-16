@@ -64,3 +64,38 @@ variable "private_subnet_2_cidr" {
   type        = string
   default     = "10.0.12.0/24"
 }
+
+# ------------------------------------------------------------------------------
+# Database Tier Variables (Step 4 - Amazon RDS MySQL)
+# ------------------------------------------------------------------------------
+
+variable "db_name" {
+  description = "Initial database name automatically created when the RDS MySQL instance boots"
+  type        = string
+  default     = "wordpress"
+}
+
+variable "db_username" {
+  description = "Master administrative username for the RDS MySQL database"
+  type        = string
+  default     = "wpuser"
+}
+
+variable "db_password" {
+  description = "Master administrative password for the RDS MySQL database (Sensitive)"
+  type        = string
+  sensitive   = true
+  default     = "SecureLabPass2026!"
+}
+
+variable "db_instance_class" {
+  description = "Compute and memory capacity for the database instance (db.t3.micro is AWS Free Tier eligible)"
+  type        = string
+  default     = "db.t3.micro"
+}
+
+variable "db_allocated_storage" {
+  description = "Initial allocated storage in gigabytes (AWS Free Tier includes up to 20 GB gp3/gp2)"
+  type        = number
+  default     = 20
+}
