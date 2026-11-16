@@ -32,9 +32,10 @@ Pure Infrastructure as Code (IaC) repository for provisioning an enterprise-grad
 
 ---
 
-## 🗺️ Phase 1 to Phase 9 Translation Blueprint
+## 🗺️ Architecture & Blueprint Guides
 
-> 📖 **Detailed Architecture Guide:** Read the complete mapping breakdown in **[`PHASE-1-TO-9-TERRAFORM-MAPPING.md`](PHASE-1-TO-9-TERRAFORM-MAPPING.md)** to see how every single manual ClickOps step from Phase 1 through Phase 9 translates into its modular Terraform HCL resource.
+- 📖 **Phase 1 to Phase 9 Translation:** **[`PHASE-1-TO-9-TERRAFORM-MAPPING.md`](PHASE-1-TO-9-TERRAFORM-MAPPING.md)** — Complete ClickOps-to-IaC translation matrix.
+- 🧱 **Step 1 & Step 2 Deep Dive:** **[`STEP-01-AND-02-EXPLANATION.md`](STEP-01-AND-02-EXPLANATION.md)** — Comprehensive architecture breakdown of VPC Networking, Multi-AZ Subnets, and Zero-Trust Chained Firewalls.
 
 ---
 
