@@ -48,6 +48,9 @@ jobs:
             --query "Reservations[*].Instances[*].InstanceId" \
             --output text)
           
+          # Clean whitespace and newlines into a single space-separated string
+          INSTANCE_IDS=$(echo "$INSTANCE_IDS" | xargs)
+          
           if [ -z "$INSTANCE_IDS" ]; then
             echo "::error::No active instances found in the Auto Scaling Group!"
             exit 1
