@@ -58,3 +58,27 @@ output "redis_security_group_id" {
   description = "Security group ID attached to Amazon ElastiCache Redis"
   value       = aws_security_group.redis.id
 }
+
+# ------------------------------------------------------------------------------
+# Tier: Step 3 - IAM Return Values (Outputs)
+# ------------------------------------------------------------------------------
+
+output "ec2_iam_role_name" {
+  description = "Name of the IAM Role attached to WordPress EC2 instances"
+  value       = aws_iam_role.ec2.name
+}
+
+output "ec2_iam_role_arn" {
+  description = "ARN of the IAM Role attached to WordPress EC2 instances"
+  value       = aws_iam_role.ec2.arn
+}
+
+output "ec2_instance_profile_name" {
+  description = "Name of the IAM Instance Profile attached to WordPress Launch Template"
+  value       = aws_iam_instance_profile.ec2.name
+}
+
+output "ec2_instance_profile_arn" {
+  description = "ARN of the IAM Instance Profile attached to WordPress Launch Template"
+  value       = aws_iam_instance_profile.ec2.arn
+}

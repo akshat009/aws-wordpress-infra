@@ -12,6 +12,7 @@ Welcome to the **Engineering Notes & Discussion Repository** for `aws-wordpress-
 | **[`02-step-01-and-02-networking-and-security.md`](02-step-01-and-02-networking-and-security.md)** | **Deep Dive** | Detailed breakdown of Step 1 (VPC, Multi-AZ Subnets, IGW, Route Tables) and Step 2 (Security Group Chaining, Zero-Trust). |
 | **[`03-oidc-aws-iam-setup.md`](03-oidc-aws-iam-setup.md)** | **DevSecOps / CI/CD** | Root cause analysis and step-by-step resolution for GitHub Actions passwordless OIDC authentication (`sts:AssumeRoleWithWebIdentity`). |
 | **[`04-static-ip-vs-alb-dns.md`](04-static-ip-vs-alb-dns.md)** | **Architecture Q&A** | Comprehensive explanation of why modern production systems replace Static Elastic IPs (EIP) with dynamic ALB DNS endpoints and Route 53 aliases. |
+| **[`05-step-03-iam-and-zero-trust.md`](05-step-03-iam-and-zero-trust.md)** | **Deep Dive** | Step 3 deep dive: IAM Role for EC2, SSM Session Manager (SSH elimination), CloudWatch Unified Agent, S3 media least privilege, and Instance Profile. |
 
 ---
 
