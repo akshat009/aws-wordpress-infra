@@ -34,9 +34,12 @@ Pure Infrastructure as Code (IaC) repository for provisioning an enterprise-grad
 
 ## 🗺️ Architecture & Blueprint Guides
 
-- 📖 **Phase 1 to Phase 9 Translation:** **[`PHASE-1-TO-9-TERRAFORM-MAPPING.md`](PHASE-1-TO-9-TERRAFORM-MAPPING.md)** — Complete ClickOps-to-IaC translation matrix.
-- 🧱 **Step 1 & Step 2 Deep Dive:** **[`STEP-01-AND-02-EXPLANATION.md`](STEP-01-AND-02-EXPLANATION.md)** — Comprehensive architecture breakdown of VPC Networking, Multi-AZ Subnets, and Zero-Trust Chained Firewalls.
-- 🔐 **IAM OIDC & CI/CD Setup:** **[`OIDC-AWS-IAM-SETUP.md`](OIDC-AWS-IAM-SETUP.md)** — Passwordless AWS IAM Trust Policy configuration for GitHub Actions runners.
+All in-depth architectural guides, deep-dive retrospectives, and discussion notes are organized in the **[`notes/`](notes/README.md)** directory:
+
+- 📖 **Master Translation Matrix:** **[`notes/01-phase-1-to-9-terraform-mapping.md`](notes/01-phase-1-to-9-terraform-mapping.md)** — Complete ClickOps-to-IaC translation matrix.
+- 🧱 **Step 1 & Step 2 Deep Dive:** **[`notes/02-step-01-and-02-networking-and-security.md`](notes/02-step-01-and-02-networking-and-security.md)** — Comprehensive architecture breakdown of VPC Networking, Multi-AZ Subnets, and Zero-Trust Chained Firewalls.
+- 🔐 **IAM OIDC & CI/CD Setup:** **[`notes/03-oidc-aws-iam-setup.md`](notes/03-oidc-aws-iam-setup.md)** — Passwordless AWS IAM Trust Policy configuration for GitHub Actions runners.
+- 🌐 **Static IP vs ALB DNS Q&A:** **[`notes/04-static-ip-vs-alb-dns.md`](notes/04-static-ip-vs-alb-dns.md)** — Architectural explanation of dynamic DNS endpoints, high availability, and NAT Gateway trade-offs.
 
 ---
 
@@ -55,6 +58,12 @@ aws-wordpress-infra/
 ├── security-groups.tf      # Step 2: 4 Chained Firewalls (ALB, Web, DB, Redis)
 ├── outputs.tf              # Exported resource IDs consumed by downstream tiers
 ├── install.sh              # EC2 cloud-init bootstrap script (Nginx, PHP, WordPress)
+├── notes/                  # Architecture documentation, discussion logs, and blueprints
+│   ├── README.md           # Master notes directory index
+│   ├── 01-phase-1-to-9-terraform-mapping.md
+│   ├── 02-step-01-and-02-networking-and-security.md
+│   ├── 03-oidc-aws-iam-setup.md
+│   └── 04-static-ip-vs-alb-dns.md
 └── README.md               # Repository documentation and architectural guide
 ```
 
