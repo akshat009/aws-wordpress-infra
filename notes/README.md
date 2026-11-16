@@ -13,6 +13,7 @@ Welcome to the **Engineering Notes & Discussion Repository** for `aws-wordpress-
 | **[`03-oidc-aws-iam-setup.md`](03-oidc-aws-iam-setup.md)** | **DevSecOps / CI/CD** | Root cause analysis and step-by-step resolution for GitHub Actions passwordless OIDC authentication (`sts:AssumeRoleWithWebIdentity`). |
 | **[`04-static-ip-vs-alb-dns.md`](04-static-ip-vs-alb-dns.md)** | **Architecture Q&A** | Comprehensive explanation of why modern production systems replace Static Elastic IPs (EIP) with dynamic ALB DNS endpoints and Route 53 aliases. |
 | **[`05-step-03-iam-and-zero-trust.md`](05-step-03-iam-and-zero-trust.md)** | **Deep Dive** | Step 3 deep dive: IAM Role for EC2, SSM Session Manager (SSH elimination), CloudWatch Unified Agent, S3 media least privilege, and Instance Profile. |
+| **[`06-step-04-rds-database-decoupling.md`](06-step-04-rds-database-decoupling.md)** | **Deep Dive** | Step 4 deep dive: Decoupled Amazon RDS MySQL 8.0, DB Subnet Groups across 2 AZs, zero public ingress, storage autoscaling, and SG chaining. |
 
 ---
 

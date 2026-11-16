@@ -82,3 +82,32 @@ output "ec2_instance_profile_arn" {
   description = "ARN of the IAM Instance Profile attached to WordPress Launch Template"
   value       = aws_iam_instance_profile.ec2.arn
 }
+
+# ------------------------------------------------------------------------------
+# Tier: Step 4 - Relational Database Return Values (Outputs)
+# ------------------------------------------------------------------------------
+
+output "rds_endpoint" {
+  description = "The connection endpoint for the Amazon RDS MySQL database (Host:Port)"
+  value       = aws_db_instance.wordpress.endpoint
+}
+
+output "rds_address" {
+  description = "The DNS hostname address of the RDS MySQL database (used in wp-config.php)"
+  value       = aws_db_instance.wordpress.address
+}
+
+output "rds_port" {
+  description = "The database listening port (default MySQL: 3306)"
+  value       = aws_db_instance.wordpress.port
+}
+
+output "rds_database_name" {
+  description = "The initial MySQL database name"
+  value       = aws_db_instance.wordpress.db_name
+}
+
+output "rds_username" {
+  description = "Master administrative username for database connections"
+  value       = aws_db_instance.wordpress.username
+}
