@@ -137,8 +137,8 @@ output "autoscaling_group_name" {
 }
 
 output "wordpress_url" {
-  description = "🎉 The live public web URL to access WordPress in your browser"
-  value       = "http://${aws_lb.main.dns_name}"
+  description = "🎉 The live secure public web URL to access WordPress in your browser"
+  value       = "https://${var.domain_name}"
 }
 
 # ------------------------------------------------------------------------------

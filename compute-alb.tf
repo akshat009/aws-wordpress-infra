@@ -74,17 +74,22 @@ resource "aws_lb" "main" {
 }
 
 # ------------------------------------------------------------------------------
-# 4. ALB HTTP:80 Ingress Listener
+# 4. ALB HTTP:80 Ingress Listener (Auto-Redirect to HTTPS:443)
 # ------------------------------------------------------------------------------
-# Forwards incoming port 80 HTTP web requests to the Target Group fleet.
+# Automatically redirects all plain HTTP port 80 requests to encrypted HTTPS:443.
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = 80
   protocol          = "HTTP"
 
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.web.arn
+    type = "redirect"
+
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
   }
 }
 
