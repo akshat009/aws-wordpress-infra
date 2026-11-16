@@ -111,3 +111,32 @@ output "rds_username" {
   description = "Master administrative username for database connections"
   value       = aws_db_instance.wordpress.username
 }
+
+# ------------------------------------------------------------------------------
+# Tier: Step 6 - Compute & Application Load Balancer Return Values (Outputs)
+# ------------------------------------------------------------------------------
+
+output "alb_dns_name" {
+  description = "The public dynamic DNS endpoint of the Application Load Balancer"
+  value       = aws_lb.main.dns_name
+}
+
+output "alb_arn" {
+  description = "The Amazon Resource Name (ARN) of the Application Load Balancer"
+  value       = aws_lb.main.arn
+}
+
+output "target_group_arn" {
+  description = "The Amazon Resource Name (ARN) of the ALB Target Group"
+  value       = aws_lb_target_group.web.arn
+}
+
+output "autoscaling_group_name" {
+  description = "Name of the Auto Scaling Group managing WordPress web servers"
+  value       = aws_autoscaling_group.web.name
+}
+
+output "wordpress_url" {
+  description = "🎉 The live public web URL to access WordPress in your browser"
+  value       = "http://${aws_lb.main.dns_name}"
+}
