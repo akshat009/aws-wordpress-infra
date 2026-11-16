@@ -140,3 +140,27 @@ output "wordpress_url" {
   description = "🎉 The live public web URL to access WordPress in your browser"
   value       = "http://${aws_lb.main.dns_name}"
 }
+
+# ------------------------------------------------------------------------------
+# Tier: Step 5 - S3 Media Storage & CloudFront CDN Return Values (Outputs)
+# ------------------------------------------------------------------------------
+
+output "s3_media_bucket_name" {
+  description = "The globally unique name of the S3 media bucket"
+  value       = aws_s3_bucket.media.id
+}
+
+output "s3_media_bucket_arn" {
+  description = "The Amazon Resource Name (ARN) of the S3 media bucket"
+  value       = aws_s3_bucket.media.arn
+}
+
+output "cloudfront_distribution_id" {
+  description = "The unique identifier of the CloudFront CDN distribution"
+  value       = aws_cloudfront_distribution.media.id
+}
+
+output "cloudfront_distribution_domain_name" {
+  description = "The global domain name of the CloudFront CDN distribution"
+  value       = aws_cloudfront_distribution.media.domain_name
+}
