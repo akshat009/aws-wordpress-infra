@@ -31,6 +31,10 @@ resource "aws_acm_certificate_validation" "cert" {
 # ------------------------------------------------------------------------------
 # 3. ALB HTTPS (Port 443) Ingress Listener
 # ------------------------------------------------------------------------------
+# 💡 NOTE (IF NO LOAD BALANCER): AWS ACM public SSL certificates CANNOT be attached
+#    directly to an EC2 instance. ACM only works on ALB, NLB, CloudFront, or API Gateway.
+#    If running without an ALB, comment out this entire listener resource and install
+#    Certbot (Let's Encrypt) on the EC2 instance (or place CloudFront in front of EC2).
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.main.arn
   port              = 443

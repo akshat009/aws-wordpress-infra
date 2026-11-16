@@ -63,6 +63,9 @@ resource "aws_security_group" "web" {
 
   # Inbound Rule: HTTP (Port 80) ONLY from the Application Load Balancer
   # Notice: 'security_groups' is used instead of 'cidr_blocks' (Security Group Chaining!)
+  # 💡 NOTE (IF NO LOAD BALANCER): If running a standalone EC2 without an ALB, change
+  #    'security_groups = [aws_security_group.alb.id]' to 'cidr_blocks = ["0.0.0.0/0"]'
+  #    and add another ingress block for port 443 with 'cidr_blocks = ["0.0.0.0/0"]'.
   ingress {
     description     = "Allow HTTP strictly from Application Load Balancer (no direct internet ingress)"
     from_port       = 80

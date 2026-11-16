@@ -5,6 +5,61 @@
 #              Target Group with health checks, Launch Template configured with
 #              IAM Instance Profile, and a Multi-AZ Auto Scaling Group.
 # ==============================================================================
+#
+# ==============================================================================
+# 💡 ARCHITECTURE GUIDE: WHAT IF YOU DO NOT WANT TO USE A LOAD BALANCER (ALB)?
+# (Cost Savings / Single Instance / Non-ALB Setup Guide)
+# ==============================================================================
+# If you want to run WordPress on a single standalone EC2 instance without an ALB
+# (e.g. to save ~$16-20 USD/month on AWS ALB hourly billing), you need to make
+# the following changes across 5 areas of your Terraform codebase:
+#
+# 1. IN THIS FILE (compute-alb.tf):
+#    - Comment out or delete:
+#        * aws_lb_target_group.web (Lines 70-96)
+#        * aws_lb.main (Lines 98-115)
+#        * aws_lb_listener.http (Lines 117-135)
+#        * aws_autoscaling_group.web (Lines 185-210)
+#    - Replace with a single standalone EC2 instance + Elastic IP (EIP):
+#        resource "aws_instance" "web" {
+#          ami                    = data.aws_ami.ubuntu.id
+#          instance_type          = var.instance_type
+#          subnet_id              = aws_subnet.public_1.id
+#          vpc_security_group_ids = [aws_security_group.web.id]
+#          iam_instance_profile   = aws_iam_instance_profile.ec2.name
+#          user_data              = aws_launch_template.web.user_data # or inline base64 user_data
+#          tags                   = { Name = "${var.project_name}-standalone-web" }
+#        }
+#        resource "aws_eip" "web" {
+#          instance = aws_instance.web.id
+#          domain   = "vpc"
+#        }
+#
+# 2. IN security-groups.tf:
+#    - aws_security_group.alb is NOT needed (comment out).
+#    - In aws_security_group.web:
+#        * Web server will now face the public internet directly.
+#        * Change ingress port 80 & port 443 from 'security_groups = [aws_security_group.alb.id]'
+#          to 'cidr_blocks = ["0.0.0.0/0"]'.
+#
+# 3. IN ssl.tf:
+#    - AWS ACM public certificates CANNOT be attached directly to an EC2 instance!
+#      (ACM certificates can only be attached to ALB, NLB, CloudFront, or API Gateway).
+#    - Comment out aws_lb_listener.https.
+#    - To get free SSL without an ALB, install Certbot (Let's Encrypt) inside EC2
+#      via install.sh: 'apt install certbot python3-certbot-nginx -y'
+#
+# 4. IN outputs.tf:
+#    - Remove/comment out 'alb_dns_name' and 'target_group_arn'.
+#    - Add output for the Elastic IP:
+#        output "wordpress_public_ip" {
+#          value = aws_eip.web.public_ip
+#        }
+#
+# 5. IN DNS (Hostinger / Registrar):
+#    - Change the DNS record from a 'CNAME' (pointing to the ALB DNS name)
+#      to an 'A' Record (pointing directly to the Elastic IP of the EC2 instance).
+# ==============================================================================
 
 # ------------------------------------------------------------------------------
 # 1. Canonical Ubuntu 24.04 LTS Dynamic AMI Lookup
