@@ -118,6 +118,7 @@ export DB_NAME="${var.db_name}"
 export DB_USER="${var.db_username}"
 export DB_PASS="${var.db_password}"
 export DB_HOST="${aws_db_instance.wordpress.address}"
+export DOMAIN_NAME="${var.domain_name}"
 
 ${file("${path.module}/install.sh")}
 EOF

@@ -59,13 +59,42 @@ jobs:
           echo "Found InService Instances: $INSTANCE_IDS"
           echo "instance_ids=$INSTANCE_IDS" >> $GITHUB_OUTPUT
 
-      # 4. Package application code into compressed payload
-      - name: Archive Application Code
+      # 4. Package application code into compressed payload and generate helper script
+      - name: Archive Application Code and Domain Config
         run: |
           tar -czf wp-content.tar.gz -C wp-content .
           BASE64_PAYLOAD=$(base64 -w 0 wp-content.tar.gz)
           echo "Payload size: $(echo -n "$BASE64_PAYLOAD" | wc -c) bytes"
           echo "PAYLOAD_BASE64=$BASE64_PAYLOAD" >> $GITHUB_ENV
+
+          cat << 'EOF' > configure-domain.sh
+          #!/bin/bash
+          set -e
+          sed -i "/WP_HOME/d" /var/www/html/wp-config.php
+          sed -i "/WP_SITEURL/d" /var/www/html/wp-config.php
+          sed -i "/HTTP_X_FORWARDED_PROTO/d" /var/www/html/wp-config.php
+          sed -i "/HTTP_HOST/d" /var/www/html/wp-config.php
+          sed -i "/http_protocol/d" /var/www/html/wp-config.php
+
+          sed -i "/require_once.*wp-settings.php/i \\
+          if (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO']) && \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {\\
+              \$_SERVER['HTTPS'] = 'on';\\
+          }\\
+          define('WP_HOME', 'https://lab.asaxenadev.com');\\
+          define('WP_SITEURL', 'https://lab.asaxenadev.com');\\
+          " /var/www/html/wp-config.php
+
+          DB_NAME=$(grep DB_NAME /var/www/html/wp-config.php | cut -d "'" -f 4)
+          DB_USER=$(grep DB_USER /var/www/html/wp-config.php | cut -d "'" -f 4)
+          DB_PASS=$(grep DB_PASSWORD /var/www/html/wp-config.php | cut -d "'" -f 4)
+          DB_HOST=$(grep DB_HOST /var/www/html/wp-config.php | cut -d "'" -f 4)
+          mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "UPDATE wp_options SET option_value='https://lab.asaxenadev.com' WHERE option_name IN ('siteurl', 'home');" || true
+          systemctl reload nginx
+          echo "Domain configuration and database update completed successfully!"
+          EOF
+
+          DOMAIN_SCRIPT_BASE64=$(base64 -w 0 configure-domain.sh)
+          echo "DOMAIN_SCRIPT_BASE64=$DOMAIN_SCRIPT_BASE64" >> $GITHUB_ENV
 
       # 5. Execute Zero-Trust Deployment via AWS Systems Manager (SSM)
       - name: Deploy Code via AWS Systems Manager Run Command
@@ -76,7 +105,7 @@ jobs:
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids $INSTANCE_IDS \
             --document-name "AWS-RunShellScript" \
-            --comment "GitOps Application Deployment: wp-content" \
+            --comment "GitOps Application Deployment: wp-content and domain config" \
             --parameters 'commands=[
               "mkdir -p /tmp/deploy",
               "echo \"${{ env.PAYLOAD_BASE64 }}\" | base64 -d > /tmp/deploy/wp-content.tar.gz",
@@ -86,8 +115,11 @@ jobs:
               "chown -R www-data:www-data /var/www/html/wp-content/",
               "find /var/www/html/wp-content/ -type d -exec chmod 755 {} \\;",
               "find /var/www/html/wp-content/ -type f -exec chmod 644 {} \\;",
-              "systemctl reload nginx",
-              "echo Application deployment successful!"
+              "echo \"${{ env.DOMAIN_SCRIPT_BASE64 }}\" | base64 -d > /tmp/configure-domain.sh",
+              "chmod +x /tmp/configure-domain.sh",
+              "bash /tmp/configure-domain.sh",
+              "rm -f /tmp/configure-domain.sh",
+              "echo Application deployment and domain configuration successful!"
             ]' \
             --query "Command.CommandId" \
             --output text)
