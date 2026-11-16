@@ -42,6 +42,7 @@ All in-depth architectural guides, deep-dive retrospectives, and discussion note
 - 🌐 **Static IP vs ALB DNS Q&A:** **[`notes/04-static-ip-vs-alb-dns.md`](notes/04-static-ip-vs-alb-dns.md)** — Architectural explanation of dynamic DNS endpoints, high availability, and NAT Gateway trade-offs.
 - 🛡️ **Step 3 Deep Dive:** **[`notes/05-step-03-iam-and-zero-trust.md`](notes/05-step-03-iam-and-zero-trust.md)** — EC2 IAM Role, SSM Session Manager (Port 22 SSH elimination), CloudWatch Agent, and S3 least privilege.
 - 🗄️ **Step 4 Deep Dive:** **[`notes/06-step-04-rds-database-decoupling.md`](notes/06-step-04-rds-database-decoupling.md)** — Decoupled Amazon RDS MySQL 8.0, DB Subnet Groups, Storage Autoscaling, and Zero-Trust isolation.
+- 🚀 **Step 6 Deep Dive:** **[`notes/07-step-06-compute-and-alb.md`](notes/07-step-06-compute-and-alb.md)** — Application Load Balancer, Launch Template, Auto Scaling Group Fleet, and public `wordpress_url`.
 
 ---
 
@@ -60,6 +61,7 @@ aws-wordpress-infra/
 ├── security-groups.tf      # Step 2: 4 Chained Firewalls (ALB, Web, DB, Redis)
 ├── iam.tf                  # Step 3: EC2 IAM Role, SSM, CloudWatch, S3 Policy & Instance Profile
 ├── rds.tf                  # Step 4: Multi-AZ Subnet Group & Managed Amazon RDS MySQL 8.0
+├── compute-alb.tf          # Step 6: Application Load Balancer & Multi-AZ Auto Scaling EC2 Fleet
 ├── outputs.tf              # Exported resource IDs consumed by downstream tiers
 ├── install.sh              # EC2 cloud-init bootstrap script (Nginx, PHP, WordPress)
 ├── notes/                  # Architecture documentation, discussion logs, and blueprints
@@ -69,7 +71,8 @@ aws-wordpress-infra/
 │   ├── 03-oidc-aws-iam-setup.md
 │   ├── 04-static-ip-vs-alb-dns.md
 │   ├── 05-step-03-iam-and-zero-trust.md
-│   └── 06-step-04-rds-database-decoupling.md
+│   ├── 06-step-04-rds-database-decoupling.md
+│   └── 07-step-06-compute-and-alb.md
 └── README.md               # Repository documentation and architectural guide
 ```
 

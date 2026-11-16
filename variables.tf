@@ -99,3 +99,31 @@ variable "db_allocated_storage" {
   type        = number
   default     = 20
 }
+
+# ------------------------------------------------------------------------------
+# Compute & Auto Scaling Tier Variables (Step 6 - ALB & EC2 Fleet)
+# ------------------------------------------------------------------------------
+
+variable "instance_type" {
+  description = "EC2 hardware instance size for WordPress web nodes (t3.micro is AWS Free Tier eligible)"
+  type        = string
+  default     = "t3.micro"
+}
+
+variable "asg_min_size" {
+  description = "Minimum number of healthy EC2 instances maintained in the Auto Scaling Group"
+  type        = number
+  default     = 1
+}
+
+variable "asg_desired_capacity" {
+  description = "Initial target number of EC2 instances running behind the Application Load Balancer"
+  type        = number
+  default     = 2
+}
+
+variable "asg_max_size" {
+  description = "Maximum burst limit for EC2 instances during high traffic spikes"
+  type        = number
+  default     = 4
+}
