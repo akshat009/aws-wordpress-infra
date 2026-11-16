@@ -32,3 +32,7 @@ terraform.rc
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local discussion & architecture notes (kept locally only, never pushed to GitHub)
+notes/
+

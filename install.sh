@@ -79,6 +79,20 @@ sed -i "s/username_here/${DB_USER}/" wp-config.php
 sed -i "s/password_here/${DB_PASS}/" wp-config.php
 sed -i "s/localhost/${DB_HOST}/" wp-config.php
 
+# 11. Enable Dynamic Domain & Reverse Proxy Support for ALB and Custom Domain
+cat << 'EOF' >> /var/www/html/wp-config.php
+
+// Reverse Proxy & Dynamic Host Configuration (ALB & Custom Domain)
+if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+    $_SERVER['HTTPS'] = 'on';
+}
+if (isset($_SERVER['HTTP_HOST'])) {
+    $http_protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https://' : 'http://';
+    define('WP_HOME', $http_protocol . $_SERVER['HTTP_HOST']);
+    define('WP_SITEURL', $http_protocol . $_SERVER['HTTP_HOST']);
+}
+EOF
+
 # Apply production permissions
 chown -R www-data:www-data /var/www/html
 find /var/www/html -type d -exec chmod 755 {} \;

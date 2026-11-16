@@ -4,9 +4,17 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "**.tf"
+      - "install.sh"
+      - ".github/workflows/terraform.yml"
   pull_request:
     branches:
       - main
+    paths:
+      - "**.tf"
+      - "install.sh"
+      - ".github/workflows/terraform.yml"
   workflow_dispatch:
     inputs:
       action:

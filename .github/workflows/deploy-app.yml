@@ -1,0 +1,130 @@
+name: "Deploy WordPress Application Code"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "wp-content/**"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Target deployment scope"
+        required: true
+        default: "wp-content"
+        type: choice
+        options:
+          - "wp-content"
+
+permissions:
+  id-token: write # Required for AWS IAM OIDC
+  contents: read  # Required for actions/checkout
+
+jobs:
+  deploy:
+    name: "Deploy to EC2 Auto Scaling Fleet via SSM"
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout repository code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Authenticate to AWS via OIDC (Zero Static Keys!)
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::538820337783:role/GitHubActionsTerraformRole
+          aws-region: ap-south-1
+          audience: sts.amazonaws.com
+
+      # 3. Locate Active EC2 Instances in Auto Scaling Group
+      - name: Locate Active Web Instances
+        id: get-instances
+        run: |
+          echo "Discovering active InService instances in Auto Scaling Group..."
+          INSTANCE_IDS=$(aws ec2 describe-instances \
+            --filters "Name=tag:aws:autoscaling:groupName,Values=wp-lab-asg*" "Name=instance-state-name,Values=running" \
+            --query "Reservations[*].Instances[*].InstanceId" \
+            --output text)
+          
+          if [ -z "$INSTANCE_IDS" ]; then
+            echo "::error::No active instances found in the Auto Scaling Group!"
+            exit 1
+          fi
+          
+          echo "Found InService Instances: $INSTANCE_IDS"
+          echo "instance_ids=$INSTANCE_IDS" >> $GITHUB_OUTPUT
+
+      # 4. Package application code into compressed payload
+      - name: Archive Application Code
+        run: |
+          tar -czf wp-content.tar.gz -C wp-content .
+          BASE64_PAYLOAD=$(base64 -w 0 wp-content.tar.gz)
+          echo "Payload size: $(echo -n "$BASE64_PAYLOAD" | wc -c) bytes"
+          echo "PAYLOAD_BASE64=$BASE64_PAYLOAD" >> $GITHUB_ENV
+
+      # 5. Execute Zero-Trust Deployment via AWS Systems Manager (SSM)
+      - name: Deploy Code via AWS Systems Manager Run Command
+        run: |
+          INSTANCE_IDS="${{ steps.get-instances.outputs.instance_ids }}"
+          echo "Dispatching deployment command to instances: $INSTANCE_IDS"
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids $INSTANCE_IDS \
+            --document-name "AWS-RunShellScript" \
+            --comment "GitOps Application Deployment: wp-content" \
+            --parameters 'commands=[
+              "mkdir -p /tmp/deploy",
+              "echo \"${{ env.PAYLOAD_BASE64 }}\" | base64 -d > /tmp/deploy/wp-content.tar.gz",
+              "mkdir -p /var/www/html/wp-content",
+              "tar -xzf /tmp/deploy/wp-content.tar.gz -C /var/www/html/wp-content/",
+              "rm -rf /tmp/deploy",
+              "chown -R www-data:www-data /var/www/html/wp-content/",
+              "find /var/www/html/wp-content/ -type d -exec chmod 755 {} \\;",
+              "find /var/www/html/wp-content/ -type f -exec chmod 644 {} \\;",
+              "systemctl reload nginx",
+              "echo Application deployment successful!"
+            ]' \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM Command sent with ID: $COMMAND_ID"
+          echo "Monitoring command status..."
+
+          sleep 5
+
+          for ID in $INSTANCE_IDS; do
+            echo "Verifying execution on node: $ID..."
+            STATUS="Pending"
+            ATTEMPTS=0
+            while [ "$STATUS" = "Pending" ] || [ "$STATUS" = "InProgress" ]; do
+              ATTEMPTS=$((ATTEMPTS+1))
+              if [ $ATTEMPTS -gt 15 ]; then
+                echo "::error::SSM command timed out on instance $ID"
+                exit 1
+              fi
+              sleep 4
+              STATUS=$(aws ssm get-command-invocation \
+                --command-id "$COMMAND_ID" \
+                --instance-id "$ID" \
+                --query "Status" \
+                --output text 2>/dev/null || echo "Pending")
+            done
+
+            OUTPUT=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$ID" \
+              --query "StandardOutputContent" \
+              --output text)
+            
+            echo "Instance $ID result: $STATUS"
+            echo "$OUTPUT"
+
+            if [ "$STATUS" != "Success" ]; then
+              echo "::error::Deployment failed on instance $ID with status $STATUS"
+              exit 1
+            fi
+          done
+
+          echo "🎉 All instances in Auto Scaling Group updated successfully!"

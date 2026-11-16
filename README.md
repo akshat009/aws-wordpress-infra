@@ -32,20 +32,6 @@ Pure Infrastructure as Code (IaC) repository for provisioning an enterprise-grad
 
 ---
 
-## 🗺️ Architecture & Blueprint Guides
-
-All in-depth architectural guides, deep-dive retrospectives, and discussion notes are organized in the **[`notes/`](notes/README.md)** directory:
-
-- 📖 **Master Translation Matrix:** **[`notes/01-phase-1-to-9-terraform-mapping.md`](notes/01-phase-1-to-9-terraform-mapping.md)** — Complete ClickOps-to-IaC translation matrix.
-- 🧱 **Step 1 & Step 2 Deep Dive:** **[`notes/02-step-01-and-02-networking-and-security.md`](notes/02-step-01-and-02-networking-and-security.md)** — Comprehensive architecture breakdown of VPC Networking, Multi-AZ Subnets, and Zero-Trust Chained Firewalls.
-- 🔐 **IAM OIDC & CI/CD Setup:** **[`notes/03-oidc-aws-iam-setup.md`](notes/03-oidc-aws-iam-setup.md)** — Passwordless AWS IAM Trust Policy configuration for GitHub Actions runners.
-- 🌐 **Static IP vs ALB DNS Q&A:** **[`notes/04-static-ip-vs-alb-dns.md`](notes/04-static-ip-vs-alb-dns.md)** — Architectural explanation of dynamic DNS endpoints, high availability, and NAT Gateway trade-offs.
-- 🛡️ **Step 3 Deep Dive:** **[`notes/05-step-03-iam-and-zero-trust.md`](notes/05-step-03-iam-and-zero-trust.md)** — EC2 IAM Role, SSM Session Manager (Port 22 SSH elimination), CloudWatch Agent, and S3 least privilege.
-- 🗄️ **Step 4 Deep Dive:** **[`notes/06-step-04-rds-database-decoupling.md`](notes/06-step-04-rds-database-decoupling.md)** — Decoupled Amazon RDS MySQL 8.0, DB Subnet Groups, Storage Autoscaling, and Zero-Trust isolation.
-- 🚀 **Step 6 Deep Dive:** **[`notes/07-step-06-compute-and-alb.md`](notes/07-step-06-compute-and-alb.md)** — Application Load Balancer, Launch Template, Auto Scaling Group Fleet, and public `wordpress_url`.
-
----
-
 ## 📂 Comprehensive File-by-File Code Explanation
 
 Every file in this repository is strictly modularized following HashiCorp standard conventions:
@@ -53,8 +39,9 @@ Every file in this repository is strictly modularized following HashiCorp standa
 ```text
 aws-wordpress-infra/
 ├── .github/workflows/
-│   └── terraform.yml       # Passwordless GitOps CI/CD pipeline via AWS IAM OIDC
-├── .gitignore              # Ignores sensitive state files, lock files, and local binaries
+│   ├── terraform.yml       # Passwordless GitOps Infrastructure CI/CD via IAM OIDC
+│   └── deploy-app.yml      # Zero-Trust Application Code Deployment via AWS SSM
+├── .gitignore              # Ignores local notes, sensitive state files, and caches
 ├── provider.tf             # Terraform binary requirements, AWS Provider & S3 Remote State
 ├── variables.tf            # Parameterized CIDR blocks, regions, environments, and tags
 ├── vpc.tf                  # Step 1: Multi-AZ Custom VPC, Subnets, IGW, and Route Tables
@@ -64,15 +51,10 @@ aws-wordpress-infra/
 ├── compute-alb.tf          # Step 6: Application Load Balancer & Multi-AZ Auto Scaling EC2 Fleet
 ├── outputs.tf              # Exported resource IDs consumed by downstream tiers
 ├── install.sh              # EC2 cloud-init bootstrap script (Nginx, PHP, WordPress)
-├── notes/                  # Architecture documentation, discussion logs, and blueprints
-│   ├── README.md           # Master notes directory index
-│   ├── 01-phase-1-to-9-terraform-mapping.md
-│   ├── 02-step-01-and-02-networking-and-security.md
-│   ├── 03-oidc-aws-iam-setup.md
-│   ├── 04-static-ip-vs-alb-dns.md
-│   ├── 05-step-03-iam-and-zero-trust.md
-│   ├── 06-step-04-rds-database-decoupling.md
-│   └── 07-step-06-compute-and-alb.md
+├── wp-content/             # Application code and assets deployed via CI/CD
+│   ├── plugins/            # WordPress custom plugins
+│   └── themes/             # WordPress custom themes
+│       └── wp-lab-theme/   # Custom responsive child theme
 └── README.md               # Repository documentation and architectural guide
 ```
 
