@@ -27,6 +27,12 @@ variable "environment" {
   default     = "lab"
 }
 
+variable "domain_name" {
+  description = "Custom domain or subdomain for WordPress (e.g. lab.asaxenadev.com)"
+  type        = string
+  default     = "lab.asaxenadev.com"
+}
+
 # ------------------------------------------------------------------------------
 # Networking Tier Variables (Step 1 - VPC & Subnets)
 # ------------------------------------------------------------------------------
