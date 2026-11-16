@@ -12,15 +12,15 @@
 # In Phase 1, AWS quietly used the Default VPC (172.31.0.0/16).
 # Here, we create an enterprise-grade isolated Custom VPC with 65,536 private IPs.
 resource "aws_vpc" "main" {
-  cidr_block           = var.vpc_cidr # "10.0.0.0/16"
-  
+  cidr_block = var.vpc_cidr # "10.0.0.0/16"
+
   # enable_dns_hostnames: Mandatory! AWS defaults this to false in custom VPCs.
   # If false, EC2 instances and RDS databases will NOT receive internal DNS names
   # (e.g. wp-db.xxxx.ap-south-1.rds.amazonaws.com), breaking database connectivity!
   enable_dns_hostnames = true
-  
+
   # enable_dns_support: Activates AWS internal recursive DNS resolver (AmazonProvidedDNS) at 10.0.0.2
-  enable_dns_support   = true
+  enable_dns_support = true
 
   tags = {
     Name = "${var.project_name}-vpc"
@@ -36,10 +36,10 @@ resource "aws_vpc" "main" {
 
 # Public Subnet 1: Located in Mumbai Datacenter A (ap-south-1a)
 resource "aws_subnet" "public_1" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = var.public_subnet_1_cidr # 10.0.1.0/24 (251 usable IPs)
-  availability_zone       = "${var.aws_region}a"     # ap-south-1a
-  
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = var.public_subnet_1_cidr # 10.0.1.0/24 (251 usable IPs)
+  availability_zone = "${var.aws_region}a"     # ap-south-1a
+
   # map_public_ip_on_launch = true: Any resource placed here receives a public IPv4 address.
   map_public_ip_on_launch = true
 
@@ -73,7 +73,7 @@ resource "aws_subnet" "public_2" {
 resource "aws_subnet" "private_1" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = var.private_subnet_1_cidr # 10.0.11.0/24 (251 usable IPs)
-  availability_zone = "${var.aws_region}a"     # ap-south-1a
+  availability_zone = "${var.aws_region}a"      # ap-south-1a
 
   tags = {
     Name = "${var.project_name}-private-1"
@@ -86,7 +86,7 @@ resource "aws_subnet" "private_1" {
 resource "aws_subnet" "private_2" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = var.private_subnet_2_cidr # 10.0.12.0/24 (251 usable IPs)
-  availability_zone = "${var.aws_region}b"     # ap-south-1b
+  availability_zone = "${var.aws_region}b"      # ap-south-1b
 
   tags = {
     Name = "${var.project_name}-private-2"

@@ -40,6 +40,7 @@ All in-depth architectural guides, deep-dive retrospectives, and discussion note
 - 🧱 **Step 1 & Step 2 Deep Dive:** **[`notes/02-step-01-and-02-networking-and-security.md`](notes/02-step-01-and-02-networking-and-security.md)** — Comprehensive architecture breakdown of VPC Networking, Multi-AZ Subnets, and Zero-Trust Chained Firewalls.
 - 🔐 **IAM OIDC & CI/CD Setup:** **[`notes/03-oidc-aws-iam-setup.md`](notes/03-oidc-aws-iam-setup.md)** — Passwordless AWS IAM Trust Policy configuration for GitHub Actions runners.
 - 🌐 **Static IP vs ALB DNS Q&A:** **[`notes/04-static-ip-vs-alb-dns.md`](notes/04-static-ip-vs-alb-dns.md)** — Architectural explanation of dynamic DNS endpoints, high availability, and NAT Gateway trade-offs.
+- 🛡️ **Step 3 Deep Dive:** **[`notes/05-step-03-iam-and-zero-trust.md`](notes/05-step-03-iam-and-zero-trust.md)** — EC2 IAM Role, SSM Session Manager (Port 22 SSH elimination), CloudWatch Agent, and S3 least privilege.
 
 ---
 
@@ -56,6 +57,7 @@ aws-wordpress-infra/
 ├── variables.tf            # Parameterized CIDR blocks, regions, environments, and tags
 ├── vpc.tf                  # Step 1: Multi-AZ Custom VPC, Subnets, IGW, and Route Tables
 ├── security-groups.tf      # Step 2: 4 Chained Firewalls (ALB, Web, DB, Redis)
+├── iam.tf                  # Step 3: EC2 IAM Role, SSM, CloudWatch, S3 Policy & Instance Profile
 ├── outputs.tf              # Exported resource IDs consumed by downstream tiers
 ├── install.sh              # EC2 cloud-init bootstrap script (Nginx, PHP, WordPress)
 ├── notes/                  # Architecture documentation, discussion logs, and blueprints
@@ -63,7 +65,8 @@ aws-wordpress-infra/
 │   ├── 01-phase-1-to-9-terraform-mapping.md
 │   ├── 02-step-01-and-02-networking-and-security.md
 │   ├── 03-oidc-aws-iam-setup.md
-│   └── 04-static-ip-vs-alb-dns.md
+│   ├── 04-static-ip-vs-alb-dns.md
+│   └── 05-step-03-iam-and-zero-trust.md
 └── README.md               # Repository documentation and architectural guide
 ```
 
