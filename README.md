@@ -36,6 +36,7 @@ Pure Infrastructure as Code (IaC) repository for provisioning an enterprise-grad
 
 - 📖 **Phase 1 to Phase 9 Translation:** **[`PHASE-1-TO-9-TERRAFORM-MAPPING.md`](PHASE-1-TO-9-TERRAFORM-MAPPING.md)** — Complete ClickOps-to-IaC translation matrix.
 - 🧱 **Step 1 & Step 2 Deep Dive:** **[`STEP-01-AND-02-EXPLANATION.md`](STEP-01-AND-02-EXPLANATION.md)** — Comprehensive architecture breakdown of VPC Networking, Multi-AZ Subnets, and Zero-Trust Chained Firewalls.
+- 🔐 **IAM OIDC & CI/CD Setup:** **[`OIDC-AWS-IAM-SETUP.md`](OIDC-AWS-IAM-SETUP.md)** — Passwordless AWS IAM Trust Policy configuration for GitHub Actions runners.
 
 ---
 
