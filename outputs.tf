@@ -164,3 +164,28 @@ output "cloudfront_distribution_domain_name" {
   description = "The global domain name of the CloudFront CDN distribution"
   value       = aws_cloudfront_distribution.media.domain_name
 }
+
+# ------------------------------------------------------------------------------
+# Tier: Step 7 - SSL / Domain Return Values (Outputs)
+# ------------------------------------------------------------------------------
+
+output "acm_certificate_arn" {
+  description = "The ARN of the AWS ACM SSL Certificate"
+  value       = aws_acm_certificate.cert.arn
+}
+
+output "acm_certificate_status" {
+  description = "Current validation status of the ACM Certificate"
+  value       = aws_acm_certificate.cert.status
+}
+
+output "acm_dns_validation_records" {
+  description = "DNS CNAME records required by Hostinger to validate the SSL certificate"
+  value = [
+    for dvo in aws_acm_certificate.cert.domain_validation_options : {
+      name   = dvo.resource_record_name
+      type   = dvo.resource_record_type
+      record = dvo.resource_record_value
+    }
+  ]
+}
