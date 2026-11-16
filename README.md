@@ -32,6 +32,12 @@ Pure Infrastructure as Code (IaC) repository for provisioning an enterprise-grad
 
 ---
 
+## 🗺️ Phase 1 to Phase 9 Translation Blueprint
+
+> 📖 **Detailed Architecture Guide:** Read the complete mapping breakdown in **[`PHASE-1-TO-9-TERRAFORM-MAPPING.md`](PHASE-1-TO-9-TERRAFORM-MAPPING.md)** to see how every single manual ClickOps step from Phase 1 through Phase 9 translates into its modular Terraform HCL resource.
+
+---
+
 ## 📂 Comprehensive File-by-File Code Explanation
 
 Every file in this repository is strictly modularized following HashiCorp standard conventions:
