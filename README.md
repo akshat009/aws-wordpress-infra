@@ -43,6 +43,7 @@ All in-depth architectural guides, deep-dive retrospectives, and discussion note
 - 🛡️ **Step 3 Deep Dive:** **[`notes/05-step-03-iam-and-zero-trust.md`](notes/05-step-03-iam-and-zero-trust.md)** — EC2 IAM Role, SSM Session Manager (Port 22 SSH elimination), CloudWatch Agent, and S3 least privilege.
 - 🗄️ **Step 4 Deep Dive:** **[`notes/06-step-04-rds-database-decoupling.md`](notes/06-step-04-rds-database-decoupling.md)** — Decoupled Amazon RDS MySQL 8.0, DB Subnet Groups, Storage Autoscaling, and Zero-Trust isolation.
 - 🚀 **Step 6 Deep Dive:** **[`notes/07-step-06-compute-and-alb.md`](notes/07-step-06-compute-and-alb.md)** — Application Load Balancer, Launch Template, Auto Scaling Group Fleet, and public `wordpress_url`.
+- 🚢 **Application CI/CD Pipeline:** **[`notes/09-application-cicd-pipeline.md`](notes/09-application-cicd-pipeline.md)** — Zero-Trust WordPress code/theme deployments via AWS SSM Run Command.
 
 ---
 
@@ -53,7 +54,8 @@ Every file in this repository is strictly modularized following HashiCorp standa
 ```text
 aws-wordpress-infra/
 ├── .github/workflows/
-│   └── terraform.yml       # Passwordless GitOps CI/CD pipeline via AWS IAM OIDC
+│   ├── terraform.yml       # Passwordless GitOps Infrastructure CI/CD via IAM OIDC
+│   └── deploy-app.yml      # Zero-Trust Application Code Deployment via AWS SSM
 ├── .gitignore              # Ignores sensitive state files, lock files, and local binaries
 ├── provider.tf             # Terraform binary requirements, AWS Provider & S3 Remote State
 ├── variables.tf            # Parameterized CIDR blocks, regions, environments, and tags
@@ -64,6 +66,9 @@ aws-wordpress-infra/
 ├── compute-alb.tf          # Step 6: Application Load Balancer & Multi-AZ Auto Scaling EC2 Fleet
 ├── outputs.tf              # Exported resource IDs consumed by downstream tiers
 ├── install.sh              # EC2 cloud-init bootstrap script (Nginx, PHP, WordPress)
+├── wp-content/             # Application code and custom themes deployed via CI/CD
+│   └── themes/
+│       └── wp-lab-theme/   # Custom responsive child theme
 ├── notes/                  # Architecture documentation, discussion logs, and blueprints
 │   ├── README.md           # Master notes directory index
 │   ├── 01-phase-1-to-9-terraform-mapping.md
@@ -72,7 +77,9 @@ aws-wordpress-infra/
 │   ├── 04-static-ip-vs-alb-dns.md
 │   ├── 05-step-03-iam-and-zero-trust.md
 │   ├── 06-step-04-rds-database-decoupling.md
-│   └── 07-step-06-compute-and-alb.md
+│   ├── 07-step-06-compute-and-alb.md
+│   ├── 08-hostinger-dns-and-dynamic-domain.md
+│   └── 09-application-cicd-pipeline.md
 └── README.md               # Repository documentation and architectural guide
 ```
 
