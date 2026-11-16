@@ -15,6 +15,7 @@ Welcome to the **Engineering Notes & Discussion Repository** for `aws-wordpress-
 | **[`05-step-03-iam-and-zero-trust.md`](05-step-03-iam-and-zero-trust.md)** | **Deep Dive** | Step 3 deep dive: IAM Role for EC2, SSM Session Manager (SSH elimination), CloudWatch Unified Agent, S3 media least privilege, and Instance Profile. |
 | **[`06-step-04-rds-database-decoupling.md`](06-step-04-rds-database-decoupling.md)** | **Deep Dive** | Step 4 deep dive: Decoupled Amazon RDS MySQL 8.0, DB Subnet Groups across 2 AZs, zero public ingress, storage autoscaling, and SG chaining. |
 | **[`07-step-06-compute-and-alb.md`](07-step-06-compute-and-alb.md)** | **Deep Dive** | Step 6 deep dive: Application Load Balancer (ALB), Target Group `/health.html`, Launch Template, Multi-AZ Auto Scaling Group, and public `wordpress_url`. |
+| **[`08-hostinger-dns-and-dynamic-domain.md`](08-hostinger-dns-and-dynamic-domain.md)** | **DNS & Domain** | Hostinger DNS CNAME configuration for `lab.asaxenadev.com` and dynamic reverse proxy domain resolution in `wp-config.php`. |
 
 ---
 
