@@ -104,6 +104,10 @@ if (isset(\$_SERVER['HTTP_HOST'])) {\\
     define('WP_HOME', 'http://${DOMAIN_NAME}');\\
     define('WP_SITEURL', 'http://${DOMAIN_NAME}');\\
 }\\
+define('AS3CF_SETTINGS', serialize(array(\\
+    'provider' => 'aws',\\
+    'use-server-roles' => true,\\
+)));\\
 " /var/www/html/wp-config.php
 
 # Apply production permissions

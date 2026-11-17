@@ -66,6 +66,12 @@ if (isset($_SERVER['HTTP_HOST'])) {
     define('WP_HOME', $proto . $_SERVER['HTTP_HOST']);
     define('WP_SITEURL', $proto . $_SERVER['HTTP_HOST']);
 }
+
+// WP Offload Media Lite - Zero-Trust IAM Role Authentication (No Static AWS Keys!)
+define('AS3CF_SETTINGS', serialize(array(
+    'provider' => 'aws',
+    'use-server-roles' => true,
+)));
 """
 
 if "require_once ABSPATH . 'wp-settings.php';" in template:
