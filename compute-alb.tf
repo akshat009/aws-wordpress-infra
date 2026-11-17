@@ -31,11 +31,12 @@ data "aws_ami" "ubuntu" {
 # Single EC2 instance deployed in public subnet with an Elastic IP (EIP).
 # Connects to local MySQL on localhost (RDS commented out).
 resource "aws_instance" "web" {
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.instance_type
-  subnet_id              = aws_subnet.public_1.id
-  vpc_security_group_ids = [aws_security_group.web.id]
-  iam_instance_profile   = aws_iam_instance_profile.ec2.name
+  ami                         = data.aws_ami.ubuntu.id
+  instance_type               = var.instance_type
+  subnet_id                   = aws_subnet.public_1.id
+  vpc_security_group_ids      = [aws_security_group.web.id]
+  iam_instance_profile        = aws_iam_instance_profile.ec2.name
+  user_data_replace_on_change = true
 
   user_data = base64encode(<<-EOF
 #!/bin/bash
