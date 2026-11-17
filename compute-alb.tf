@@ -36,7 +36,11 @@ resource "aws_instance" "web" {
   subnet_id                   = aws_subnet.public_1.id
   vpc_security_group_ids      = [aws_security_group.web.id]
   iam_instance_profile        = aws_iam_instance_profile.ec2.name
-  user_data_replace_on_change = true
+  user_data_replace_on_change = false
+
+  lifecycle {
+    ignore_changes = [user_data]
+  }
 
   user_data = base64encode(<<-EOF
 #!/bin/bash
