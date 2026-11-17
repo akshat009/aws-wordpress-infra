@@ -5,45 +5,45 @@
 #              for the custom domain and provisions the ALB HTTPS:443 listener.
 # ==============================================================================
 
-# ------------------------------------------------------------------------------
-# 1. Request Public ACM SSL Certificate
-# ------------------------------------------------------------------------------
-resource "aws_acm_certificate" "cert" {
-  domain_name       = var.domain_name
-  validation_method = "DNS"
-
-  lifecycle {
-    create_before_destroy = true
-  }
-
-  tags = {
-    Name = "${var.project_name}-acm-certificate"
-  }
-}
+# ==============================================================================
+# 🏢 PROFESSIONAL PRODUCTION SETUP:
+# In an enterprise setup with an Application Load Balancer, AWS Certificate Manager
+# (ACM) provisions a free managed SSL certificate that binds to the ALB HTTPS:443 listener.
+#
+# 💡 STANDALONE / BUDGET MODE:
+# AWS ACM certificates CANNOT be attached directly to an EC2 instance (ACM only works
+# on ALB, CloudFront, or API Gateway).
+# Therefore, ACM certificate and validation resources are COMMENTED OUT.
+# For standalone EC2, free SSL is installed directly inside the instance via Certbot
+# (Let's Encrypt) in install.sh.
+# ==============================================================================
 
 # ------------------------------------------------------------------------------
-# 2. Wait for ACM Certificate Validation
+# 1. Request Public ACM SSL Certificate [COMMENTED OUT FOR STANDALONE]
 # ------------------------------------------------------------------------------
-resource "aws_acm_certificate_validation" "cert" {
-  certificate_arn = aws_acm_certificate.cert.arn
-}
+# resource "aws_acm_certificate" "cert" {
+#   domain_name       = var.domain_name
+#   validation_method = "DNS"
+#
+#   lifecycle {
+#     create_before_destroy = true
+#   }
+#
+#   tags = {
+#     Name = "${var.project_name}-acm-certificate"
+#   }
+# }
+
+# ------------------------------------------------------------------------------
+# 2. Wait for ACM Certificate Validation [COMMENTED OUT FOR STANDALONE]
+# ------------------------------------------------------------------------------
+# resource "aws_acm_certificate_validation" "cert" {
+#   certificate_arn = aws_acm_certificate.cert.arn
+# }
 
 # ------------------------------------------------------------------------------
 # 3. ALB HTTPS (Port 443) Ingress Listener [COMMENTED OUT FOR STANDALONE]
 # ------------------------------------------------------------------------------
-# ==============================================================================
-# 🏢 PROFESSIONAL PRODUCTION SETUP:
-# In an enterprise setup, public SSL/TLS certificates managed by AWS Certificate
-# Manager (ACM) are terminated at the ALB HTTPS:443 listener with TLS 1.3/1.2.
-# This completely offloads TLS encryption/decryption overhead from EC2 CPUs,
-# and AWS auto-renews certificates with zero manual intervention.
-#
-# 💡 STANDALONE / BUDGET MODE:
-# AWS ACM public SSL certificates CANNOT be attached directly to an EC2 instance.
-# (ACM only attaches to ALB, NLB, CloudFront, or API Gateway).
-# Therefore, this listener is COMMENTED OUT. SSL for standalone EC2 is handled
-# inside the instance via Certbot (Let's Encrypt).
-# ==============================================================================
 # resource "aws_lb_listener" "https" {
 #   load_balancer_arn = aws_lb.main.arn
 #   port              = 443

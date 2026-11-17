@@ -37,22 +37,20 @@ output "internet_gateway_id" {
 # Tier: Step 2 - Security Group Return Values
 # ------------------------------------------------------------------------------
 
-# 🏢 PROFESSIONAL PRODUCTION OUTPUT:
-# output "alb_security_group_id" {
-#   description = "Security group ID attached to the Application Load Balancer"
-#   value       = aws_security_group.alb.id
-# }
+output "alb_security_group_id" {
+  description = "Security group ID attached to the Application Load Balancer"
+  value       = aws_security_group.alb.id
+}
 
 output "web_security_group_id" {
   description = "Security group ID attached to the WordPress EC2 instance"
   value       = aws_security_group.web.id
 }
 
-# 🏢 PROFESSIONAL PRODUCTION OUTPUT:
-# output "db_security_group_id" {
-#   description = "Security group ID attached to Amazon RDS MySQL"
-#   value       = aws_security_group.db.id
-# }
+output "db_security_group_id" {
+  description = "Security group ID attached to Amazon RDS MySQL"
+  value       = aws_security_group.db.id
+}
 
 output "redis_security_group_id" {
   description = "Security group ID attached to Amazon ElastiCache Redis"
@@ -188,26 +186,33 @@ output "cloudfront_distribution_domain_name" {
 }
 
 # ------------------------------------------------------------------------------
-# Tier: Step 7 - SSL / Domain Return Values
+# Tier: Step 7 - SSL / Domain Return Values [COMMENTED OUT FOR STANDALONE]
 # ------------------------------------------------------------------------------
-
-output "acm_certificate_arn" {
-  description = "The ARN of the AWS ACM SSL Certificate"
-  value       = aws_acm_certificate.cert.arn
-}
-
-output "acm_certificate_status" {
-  description = "Current validation status of the ACM Certificate"
-  value       = aws_acm_certificate.cert.status
-}
-
-output "acm_dns_validation_records" {
-  description = "DNS CNAME records required by Hostinger to validate the SSL certificate"
-  value = [
-    for dvo in aws_acm_certificate.cert.domain_validation_options : {
-      name   = dvo.resource_record_name
-      type   = dvo.resource_record_type
-      record = dvo.resource_record_value
-    }
-  ]
-}
+# ==============================================================================
+# 🏢 PROFESSIONAL PRODUCTION SETUP:
+# In an enterprise setup with an ALB, outputs expose ACM certificate validation
+# CNAME records for Route 53 or external DNS validation.
+#
+# 💡 STANDALONE / BUDGET MODE:
+# ACM is not used in standalone EC2 mode; SSL is managed via Certbot inside the VM.
+# ==============================================================================
+# output "acm_certificate_arn" {
+#   description = "The ARN of the AWS ACM SSL Certificate"
+#   value       = aws_acm_certificate.cert.arn
+# }
+#
+# output "acm_certificate_status" {
+#   description = "Current validation status of the ACM Certificate"
+#   value       = aws_acm_certificate.cert.status
+# }
+#
+# output "acm_dns_validation_records" {
+#   description = "DNS CNAME records required by Hostinger to validate the SSL certificate"
+#   value = [
+#     for dvo in aws_acm_certificate.cert.domain_validation_options : {
+#       name   = dvo.resource_record_name
+#       type   = dvo.resource_record_type
+#       record = dvo.resource_record_value
+#     }
+#   ]
+# }

@@ -6,54 +6,49 @@
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# 1. Application Load Balancer (ALB) Security Group [COMMENTED OUT FOR STANDALONE]
+# 1. Application Load Balancer (ALB) Security Group
 # ------------------------------------------------------------------------------
 # ==============================================================================
 # 🏢 PROFESSIONAL PRODUCTION SETUP:
 # In an enterprise/production setup, the ALB Security Group is the ONLY component
 # in the entire cloud infrastructure exposed to 0.0.0.0/0 on Port 80 and 443.
 # All backend web servers sit shielded behind the ALB and never accept direct traffic.
-#
-# 💡 STANDALONE / BUDGET MODE:
-# For a single-server setup without an ALB, this ALB SG is COMMENTED OUT.
+# (Kept in code to prevent DependencyViolation during standalone migration; cost = $0).
 # ==============================================================================
-# resource "aws_security_group" "alb" {
-#   name        = "${var.project_name}-alb-sg"
-#   description = "Public ingress firewall for Application Load Balancer (HTTP/HTTPS)"
-#   vpc_id      = aws_vpc.main.id # Binds this firewall to our custom WordPress VPC
-#
-#   # Inbound Rule 1: HTTP (Port 80) from anywhere in the world
-#   ingress {
-#     description = "Allow plain HTTP traffic from global internet (redirected to HTTPS)"
-#     from_port   = 80
-#     to_port     = 80
-#     protocol    = "tcp"
-#     cidr_blocks = ["0.0.0.0/0"]
-#   }
-#
-#   # Inbound Rule 2: HTTPS (Port 443) from anywhere in the world
-#   ingress {
-#     description = "Allow encrypted HTTPS traffic from global internet"
-#     from_port   = 443
-#     to_port     = 443
-#     protocol    = "tcp"
-#     cidr_blocks = ["0.0.0.0/0"]
-#   }
-#
-#   # Outbound Rule: Allows ALB to forward traffic to backend EC2 instances on port 80
-#   egress {
-#     description = "Allow all outbound traffic to forward requests to target EC2 instances"
-#     from_port   = 0
-#     to_port     = 0
-#     protocol    = "-1" # -1 means all protocols
-#     cidr_blocks = ["0.0.0.0/0"]
-#   }
-#
-#   tags = {
-#     Name = "${var.project_name}-alb-sg"
-#     Tier = "Ingress"
-#   }
-# }
+resource "aws_security_group" "alb" {
+  name        = "${var.project_name}-alb-sg"
+  description = "Public ingress firewall for Application Load Balancer (HTTP/HTTPS)"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description = "Allow plain HTTP traffic from global internet"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow encrypted HTTPS traffic from global internet"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-alb-sg"
+    Tier = "Ingress"
+  }
+}
 
 # ------------------------------------------------------------------------------
 # 2. Web Tier (EC2 Compute) Security Group
@@ -131,35 +126,32 @@ resource "aws_security_group" "web" {
 }
 
 # ------------------------------------------------------------------------------
-# 3. Database Tier (Amazon RDS MySQL 8.0) Security Group [COMMENTED OUT FOR STANDALONE]
+# 3. Database Tier (Amazon RDS MySQL 8.0) Security Group
 # ------------------------------------------------------------------------------
 # ==============================================================================
 # 🏢 PROFESSIONAL PRODUCTION SETUP:
 # In an enterprise setup, Amazon RDS MySQL has its own dedicated firewall placed
 # in private subnets, chained strictly to accept Port 3306 ONLY from web-sg.
-#
-# 💡 STANDALONE / BUDGET MODE:
-# Commented out because MySQL runs locally (localhost) inside the EC2 instance.
+# (Kept in code to prevent DependencyViolation during standalone migration; cost = $0).
 # ==============================================================================
-# resource "aws_security_group" "db" {
-#   name        = "${var.project_name}-db-sg"
-#   description = "Firewall for Amazon RDS MySQL - chained strictly to EC2 Web SG"
-#   vpc_id      = aws_vpc.main.id
-#
-#   # Inbound Rule: MySQL (Port 3306) strictly from the WordPress EC2 Fleet
-#   ingress {
-#     description     = "Allow MySQL queries strictly from WordPress web instances"
-#     from_port       = 3306
-#     to_port         = 3306
-#     protocol        = "tcp"
-#     security_groups = [aws_security_group.web.id] # Chained strictly to web-sg!
-#   }
-#
-#   tags = {
-#     Name = "${var.project_name}-db-sg"
-#     Tier = "Database"
-#   }
-# }
+resource "aws_security_group" "db" {
+  name        = "${var.project_name}-db-sg"
+  description = "Firewall for Amazon RDS MySQL - chained strictly to EC2 Web SG"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description     = "Allow MySQL queries strictly from WordPress web instances"
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    security_groups = [aws_security_group.web.id]
+  }
+
+  tags = {
+    Name = "${var.project_name}-db-sg"
+    Tier = "Database"
+  }
+}
 
 # ------------------------------------------------------------------------------
 # 4. Cache Tier (Amazon ElastiCache Redis 7.x) Security Group
