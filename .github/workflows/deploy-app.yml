@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   deploy:
-    name: "Deploy to EC2 Auto Scaling Fleet via SSM"
+    name: "Deploy to Web Instances (Standalone EC2 or ASG Fleet) via SSM"
     runs-on: ubuntu-latest
 
     steps:
@@ -38,29 +38,40 @@ jobs:
           aws-region: ap-south-1
           audience: sts.amazonaws.com
 
-      # 3. Locate Active EC2 Instances in Auto Scaling Group
+      # 3. Locate Active Web Instances (Universal: ASG or Standalone)
       - name: Locate Active Web Instances
         id: get-instances
         run: |
-          echo "Discovering active InService instances in Auto Scaling Group..."
+          echo "Discovering active web instances (Universal: checking ASG first, then Standalone)..."
+          
+          # 1. Check if running behind an Auto Scaling Group
           INSTANCE_IDS=$(aws ec2 describe-instances \
             --filters "Name=tag:aws:autoscaling:groupName,Values=wp-lab-asg*" "Name=instance-state-name,Values=running" \
             --query "Reservations[*].Instances[*].InstanceId" \
             --output text)
           
+          # 2. If no ASG instances found, locate standalone web instances
+          if [ -z "$INSTANCE_IDS" ]; then
+            echo "No active ASG instances found. Checking for standalone EC2 instances..."
+            INSTANCE_IDS=$(aws ec2 describe-instances \
+              --filters "Name=tag:Name,Values=wp-lab*web*" "Name=instance-state-name,Values=running" \
+              --query "Reservations[*].Instances[*].InstanceId" \
+              --output text)
+          fi
+
           # Clean whitespace and newlines into a single space-separated string
           INSTANCE_IDS=$(echo "$INSTANCE_IDS" | xargs)
-          
+
           if [ -z "$INSTANCE_IDS" ]; then
-            echo "::error::No active instances found in the Auto Scaling Group!"
+            echo "::error::No active web instances found (checked both ASG and standalone tags)!"
             exit 1
           fi
-          
-          echo "Found InService Instances: $INSTANCE_IDS"
+
+          echo "Found Active Web Instances: $INSTANCE_IDS"
           echo "instance_ids=$INSTANCE_IDS" >> $GITHUB_OUTPUT
 
       # 4. Package application code into compressed payload and generate helper script
-      - name: Archive Application Code and Domain Config
+      - name: Archive Application Code and Dynamic Config
         run: |
           tar -czf wp-content.tar.gz -C wp-content .
           BASE64_PAYLOAD=$(base64 -w 0 wp-content.tar.gz)
@@ -76,21 +87,23 @@ jobs:
           sed -i "/HTTP_HOST/d" /var/www/html/wp-config.php
           sed -i "/http_protocol/d" /var/www/html/wp-config.php
 
+          # Dynamic Host and Reverse-Proxy Header Configuration
           sed -i "/require_once.*wp-settings.php/i \\
           if (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO']) && \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {\\
               \$_SERVER['HTTPS'] = 'on';\\
           }\\
-          define('WP_HOME', 'https://lab.asaxenadev.com');\\
-          define('WP_SITEURL', 'https://lab.asaxenadev.com');\\
+          if (isset(\$_SERVER['HTTP_HOST'])) {\\
+              \$proto = (isset(\$_SERVER['HTTPS']) && \$_SERVER['HTTPS'] === 'on') ? 'https://' : 'http://';\\
+              define('WP_HOME', \$proto . \$_SERVER['HTTP_HOST']);\\
+              define('WP_SITEURL', \$proto . \$_SERVER['HTTP_HOST']);\\
+          } else {\\
+              define('WP_HOME', 'http://lab.asaxenadev.com');\\
+              define('WP_SITEURL', 'http://lab.asaxenadev.com');\\
+          }\\
           " /var/www/html/wp-config.php
 
-          DB_NAME=$(grep DB_NAME /var/www/html/wp-config.php | cut -d "'" -f 4)
-          DB_USER=$(grep DB_USER /var/www/html/wp-config.php | cut -d "'" -f 4)
-          DB_PASS=$(grep DB_PASSWORD /var/www/html/wp-config.php | cut -d "'" -f 4)
-          DB_HOST=$(grep DB_HOST /var/www/html/wp-config.php | cut -d "'" -f 4)
-          mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "UPDATE wp_options SET option_value='https://lab.asaxenadev.com' WHERE option_name IN ('siteurl', 'home');" || true
           systemctl reload nginx
-          echo "Domain configuration and database update completed successfully!"
+          echo "Domain configuration and Nginx reload completed successfully!"
           EOF
 
           DOMAIN_SCRIPT_BASE64=$(base64 -w 0 configure-domain.sh)
@@ -105,7 +118,7 @@ jobs:
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids $INSTANCE_IDS \
             --document-name "AWS-RunShellScript" \
-            --comment "GitOps Application Deployment: wp-content and domain config" \
+            --comment "GitOps Universal Application Deployment: wp-content and dynamic config" \
             --parameters 'commands=[
               "mkdir -p /tmp/deploy",
               "echo \"${{ env.PAYLOAD_BASE64 }}\" | base64 -d > /tmp/deploy/wp-content.tar.gz",
@@ -119,7 +132,7 @@ jobs:
               "chmod +x /tmp/configure-domain.sh",
               "bash /tmp/configure-domain.sh",
               "rm -f /tmp/configure-domain.sh",
-              "echo Application deployment and domain configuration successful!"
+              "echo Application deployment and dynamic configuration successful!"
             ]' \
             --query "Command.CommandId" \
             --output text)
@@ -162,4 +175,4 @@ jobs:
             fi
           done
 
-          echo "🎉 All instances in Auto Scaling Group updated successfully!"
+          echo "🎉 All web instances (Standalone or ASG Fleet) updated successfully!"
