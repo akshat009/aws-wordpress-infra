@@ -81,29 +81,37 @@ jobs:
           cat << 'EOF' > configure-domain.sh
           #!/bin/bash
           set -e
-          sed -i "/WP_HOME/d" /var/www/html/wp-config.php
-          sed -i "/WP_SITEURL/d" /var/www/html/wp-config.php
-          sed -i "/HTTP_X_FORWARDED_PROTO/d" /var/www/html/wp-config.php
-          sed -i "/HTTP_HOST/d" /var/www/html/wp-config.php
-          sed -i "/http_protocol/d" /var/www/html/wp-config.php
+          python3 - << 'PYEOF'
+with open('/var/www/html/wp-config.php', 'r') as f:
+    lines = f.readlines()
 
-          # Dynamic Host and Reverse-Proxy Header Configuration
-          sed -i "/require_once.*wp-settings.php/i \\
-          if (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO']) && \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {\\
-              \$_SERVER['HTTPS'] = 'on';\\
-          }\\
-          if (isset(\$_SERVER['HTTP_HOST'])) {\\
-              \$proto = (isset(\$_SERVER['HTTPS']) && \$_SERVER['HTTPS'] === 'on') ? 'https://' : 'http://';\\
-              define('WP_HOME', \$proto . \$_SERVER['HTTP_HOST']);\\
-              define('WP_SITEURL', \$proto . \$_SERVER['HTTP_HOST']);\\
-          } else {\\
-              define('WP_HOME', 'http://lab.asaxenadev.com');\\
-              define('WP_SITEURL', 'http://lab.asaxenadev.com');\\
-          }\\
-          " /var/www/html/wp-config.php
+filtered = []
+for line in lines:
+    if any(k in line for k in ['WP_HOME', 'WP_SITEURL', 'HTTP_X_FORWARDED_PROTO', 'HTTP_HOST', '$proto =']):
+        continue
+    filtered.append(line)
 
+content = "".join(filtered)
+dynamic_block = """
+if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+    $_SERVER['HTTPS'] = 'on';
+}
+if (isset($_SERVER['HTTP_HOST'])) {
+    $proto = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https://' : 'http://';
+    define('WP_HOME', $proto . $_SERVER['HTTP_HOST']);
+    define('WP_SITEURL', $proto . $_SERVER['HTTP_HOST']);
+}
+"""
+if "wp-settings.php" in content:
+    content = content.replace("require_once ABSPATH . 'wp-settings.php';", dynamic_block + "\nrequire_once ABSPATH . 'wp-settings.php';")
+
+with open('/var/www/html/wp-config.php', 'w') as f:
+    f.write(content)
+PYEOF
+
+          php -l /var/www/html/wp-config.php
           systemctl reload nginx
-          echo "Domain configuration and Nginx reload completed successfully!"
+          echo "Dynamic domain configuration verified with php -l and Nginx reloaded!"
           EOF
 
           DOMAIN_SCRIPT_BASE64=$(base64 -w 0 configure-domain.sh)
