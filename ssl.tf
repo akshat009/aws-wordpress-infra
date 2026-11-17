@@ -29,21 +29,30 @@ resource "aws_acm_certificate_validation" "cert" {
 }
 
 # ------------------------------------------------------------------------------
-# 3. ALB HTTPS (Port 443) Ingress Listener
+# 3. ALB HTTPS (Port 443) Ingress Listener [COMMENTED OUT FOR STANDALONE]
 # ------------------------------------------------------------------------------
-# 💡 NOTE (IF NO LOAD BALANCER): AWS ACM public SSL certificates CANNOT be attached
-#    directly to an EC2 instance. ACM only works on ALB, NLB, CloudFront, or API Gateway.
-#    If running without an ALB, comment out this entire listener resource and install
-#    Certbot (Let's Encrypt) on the EC2 instance (or place CloudFront in front of EC2).
-resource "aws_lb_listener" "https" {
-  load_balancer_arn = aws_lb.main.arn
-  port              = 443
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.cert.certificate_arn
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.web.arn
-  }
-}
+# ==============================================================================
+# 🏢 PROFESSIONAL PRODUCTION SETUP:
+# In an enterprise setup, public SSL/TLS certificates managed by AWS Certificate
+# Manager (ACM) are terminated at the ALB HTTPS:443 listener with TLS 1.3/1.2.
+# This completely offloads TLS encryption/decryption overhead from EC2 CPUs,
+# and AWS auto-renews certificates with zero manual intervention.
+#
+# 💡 STANDALONE / BUDGET MODE:
+# AWS ACM public SSL certificates CANNOT be attached directly to an EC2 instance.
+# (ACM only attaches to ALB, NLB, CloudFront, or API Gateway).
+# Therefore, this listener is COMMENTED OUT. SSL for standalone EC2 is handled
+# inside the instance via Certbot (Let's Encrypt).
+# ==============================================================================
+# resource "aws_lb_listener" "https" {
+#   load_balancer_arn = aws_lb.main.arn
+#   port              = 443
+#   protocol          = "HTTPS"
+#   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+#   certificate_arn   = aws_acm_certificate_validation.cert.certificate_arn
+#
+#   default_action {
+#     type             = "forward"
+#     target_group_arn = aws_lb_target_group.web.arn
+#   }
+# }
