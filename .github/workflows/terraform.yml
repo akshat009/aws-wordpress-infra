@@ -25,6 +25,11 @@ on:
         options:
           - apply
           - destroy
+      lock_id:
+        description: "DynamoDB Lock ID to force-unlock if stuck"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   id-token: write # Required for requesting the OIDC JWT token from GitHub
@@ -65,6 +70,11 @@ jobs:
       # 5. Initialize Terraform against Remote S3 Backend + DynamoDB Lock
       - name: Terraform Init
         run: terraform init
+
+      # 5b. Force-unlock stale lock if requested
+      - name: Force Unlock Stale Lock
+        if: github.event.inputs.lock_id != ''
+        run: terraform force-unlock -force "${{ github.event.inputs.lock_id }}"
 
       # 6. Validate HCL Syntax
       - name: Terraform Validate
