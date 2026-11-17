@@ -1,0 +1,159 @@
+name: "Universal Database Migration (Local MySQL ⇄ Amazon RDS)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      direction:
+        description: "Migration Direction"
+        required: true
+        default: "local-to-rds"
+        type: choice
+        options:
+          - "local-to-rds"
+          - "rds-to-local"
+      rds_endpoint:
+        description: "RDS Endpoint Hostname (Optional: auto-discovered from Terraform if left blank)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  id-token: write # Required for AWS IAM OIDC
+  contents: read  # Required for actions/checkout
+
+jobs:
+  migrate:
+    name: "Execute Database Migration via AWS SSM"
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Authenticate to AWS via OIDC (Zero Static Keys)
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::538820337783:role/GitHubActionsTerraformRole
+          aws-region: ap-south-1
+          audience: sts.amazonaws.com
+
+      # 3. Locate Active Web Node (Target for SSM)
+      - name: Locate Target Web Instance
+        id: get-instance
+        run: |
+          echo "Locating active web server to execute migration..."
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=wp-lab*web*" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].InstanceId" \
+            --output text)
+
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+            echo "::error::No running web instance found to execute migration!"
+            exit 1
+          fi
+
+          echo "Target Instance: $INSTANCE_ID"
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+
+      # 4. Resolve Target RDS Hostname
+      - name: Resolve RDS Hostname
+        id: get-rds
+        run: |
+          RDS_HOST="${{ github.event.inputs.rds_endpoint }}"
+          
+          if [ -z "$RDS_HOST" ]; then
+            echo "Auto-discovering RDS endpoint from AWS RDS API..."
+            RDS_HOST=$(aws rds describe-db-instances \
+              --db-instance-identifier "wp-lab-db" \
+              --query "DBInstances[0].Endpoint.Address" \
+              --output text 2>/dev/null || echo "")
+          fi
+
+          if [ -z "$RDS_HOST" ] || [ "$RDS_HOST" = "None" ]; then
+            echo "::error::Could not resolve RDS hostname! Please specify it manually in workflow inputs."
+            exit 1
+          fi
+
+          echo "Resolved RDS Endpoint: $RDS_HOST"
+          echo "rds_host=$RDS_HOST" >> $GITHUB_OUTPUT
+
+      # 5. Dispatch Migration Script via AWS SSM Run Command
+      - name: Execute Migration via AWS SSM
+        run: |
+          INSTANCE_ID="${{ steps.get-instance.outputs.instance_id }}"
+          RDS_HOST="${{ steps.get-rds.outputs.rds_host }}"
+          DIRECTION="${{ github.event.inputs.direction }}"
+
+          SCRIPT_BASE64=$(base64 -w 0 scripts/migrate-db.sh)
+
+          echo "Dispatching migration script ($DIRECTION) to instance $INSTANCE_ID..."
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Execute Universal Database Migration: $DIRECTION" \
+            --parameters "commands=[
+              \"echo '$SCRIPT_BASE64' | base64 -d > /tmp/migrate-db.sh\",
+              \"chmod +x /tmp/migrate-db.sh\",
+              \"/tmp/migrate-db.sh $DIRECTION $RDS_HOST\",
+              \"rm -f /tmp/migrate-db.sh\"
+            ]" \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+          echo "Monitoring migration progress..."
+
+          STATUS="Pending"
+          ATTEMPTS=0
+          while [ "$STATUS" = "Pending" ] || [ "$STATUS" = "InProgress" ]; do
+            ATTEMPTS=$((ATTEMPTS+1))
+            if [ $ATTEMPTS -gt 30 ]; then
+              echo "::error::SSM migration command timed out!"
+              exit 1
+            fi
+            sleep 5
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query "Status" \
+              --output text 2>/dev/null || echo "Pending")
+          done
+
+          OUTPUT=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query "StandardOutputContent" \
+            --output text)
+
+          ERROR_OUTPUT=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query "StandardErrorContent" \
+            --output text)
+
+          echo "Execution Status: $STATUS"
+          echo "=== Output ==="
+          echo "$OUTPUT"
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "=== Error Details ==="
+            echo "$ERROR_OUTPUT"
+            echo "::error::Database migration failed!"
+            exit 1
+          fi
+
+      # 6. Verify Production Health Gate
+      - name: Verify Live Production Health (Smoke Test)
+        run: |
+          sleep 5
+          echo "Testing live endpoint https://lab.asaxenadev.com..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L https://lab.asaxenadev.com || echo "000")
+          echo "Target HTTP Response: $STATUS"
+          if [ "$STATUS" -ne 200 ]; then
+            echo "::error::Production Health Gate Failed after migration! Expected HTTP 200, got $STATUS"
+            exit 1
+          fi
+          echo "🎉 Production Health Gate Passed: Application is healthy (HTTP 200)!"

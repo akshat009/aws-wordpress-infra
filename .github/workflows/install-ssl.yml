@@ -1,4 +1,4 @@
-name: "Install Let's Encrypt SSL on Standalone EC2"
+name: "Universal SSL Certificate Automation"
 
 on:
   workflow_dispatch:
@@ -8,17 +8,17 @@ on:
         required: true
         default: "lab.asaxenadev.com"
       email:
-        description: "Admin Email for SSL registration"
+        description: "Admin Email for SSL registration (Standalone Certbot)"
         required: true
         default: "saxena.akshat.akshat@gmail.com"
 
 permissions:
-  id-token: write
-  contents: read
+  id-token: write # Required for AWS IAM OIDC
+  contents: read  # Required for actions/checkout
 
 jobs:
   ssl:
-    name: "Install Let's Encrypt SSL via SSM"
+    name: "Universal SSL Configuration & Diagnostics"
     runs-on: ubuntu-latest
 
     steps:
@@ -26,7 +26,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Authenticate to AWS via OIDC
+      # 2. Authenticate to AWS via OIDC (Zero Static Keys)
       - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -34,8 +34,72 @@ jobs:
           aws-region: ap-south-1
           audience: sts.amazonaws.com
 
-      # 3. Locate Standalone EC2 Instance
+      # 3. Detect Ingress Architecture Mode (ALB vs Standalone EC2)
+      - name: Detect Ingress Architecture Mode
+        id: detect-mode
+        run: |
+          echo "Scanning active AWS infrastructure topology..."
+          ALB_ARN=$(aws elbv2 describe-load-balancers \
+            --names "wp-lab-alb" \
+            --query "LoadBalancers[0].LoadBalancerArn" \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
+            echo "mode=enterprise" >> $GITHUB_OUTPUT
+            echo "alb_arn=$ALB_ARN" >> $GITHUB_OUTPUT
+            echo "🚀 Enterprise Mode Detected: Active Application Load Balancer found ($ALB_ARN)."
+          else
+            echo "mode=standalone" >> $GITHUB_OUTPUT
+            echo "💡 Standalone Mode Detected: No ALB active. Operating in Single EC2 mode."
+          fi
+
+      # 4. [Enterprise Mode] Verify ALB ACM SSL Certificate & Listeners
+      - name: Verify ALB ACM SSL Configuration
+        if: steps.detect-mode.outputs.mode == 'enterprise'
+        run: |
+          ALB_ARN="${{ steps.detect-mode.outputs.alb_arn }}"
+          DOMAIN="${{ github.event.inputs.domain }}"
+
+          echo "Querying ALB HTTPS listener..."
+          HTTPS_LISTENER=$(aws elbv2 describe-listeners \
+            --load-balancer-arn "$ALB_ARN" \
+            --query "Listeners[?Port==\`443\`].ListenerArn" \
+            --output text 2>/dev/null || echo "")
+
+          if [ -z "$HTTPS_LISTENER" ]; then
+            echo "::warning::No HTTPS:443 listener found on ALB. Please ensure ssl.tf is uncommented in Terraform!"
+            exit 1
+          fi
+
+          echo "HTTPS Listener Active: $HTTPS_LISTENER"
+
+          CERT_ARN=$(aws elbv2 describe-listeners \
+            --listener-arns "$HTTPS_LISTENER" \
+            --query "Listeners[0].Certificates[0].CertificateArn" \
+            --output text)
+
+          echo "Attached ACM Certificate: $CERT_ARN"
+
+          STATUS=$(aws acm describe-certificate \
+            --certificate-arn "$CERT_ARN" \
+            --query "Certificate.Status" \
+            --output text)
+
+          echo "ACM Certificate Status: $STATUS"
+
+          if [ "$STATUS" = "PENDING_VALIDATION" ]; then
+            echo "::warning::ACM Certificate is PENDING_VALIDATION. Checking Hostinger CNAME requirements..."
+            aws acm describe-certificate \
+              --certificate-arn "$CERT_ARN" \
+              --query "Certificate.DomainValidationOptions[*].{Domain:DomainName,CNAME_Name:ResourceRecord.Name,CNAME_Value:ResourceRecord.Value}" \
+              --output table
+          elif [ "$STATUS" = "ISSUED" ]; then
+            echo "🎉 AWS ACM Certificate is ISSUED and actively protecting the ALB with TLS 1.3!"
+          fi
+
+      # 5. [Standalone Mode] Locate Standalone EC2 Instance
       - name: Locate Standalone EC2 Instance
+        if: steps.detect-mode.outputs.mode == 'standalone'
         id: get-instance
         run: |
           INSTANCE_ID=$(aws ec2 describe-instances \
@@ -51,8 +115,9 @@ jobs:
           echo "Found Instance ID: $INSTANCE_ID"
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
 
-      # 4. Install Certbot and Issue SSL Certificate via AWS Systems Manager
+      # 6. [Standalone Mode] Execute Certbot SSL Installation via AWS SSM
       - name: Execute Certbot SSL Installation via SSM
+        if: steps.detect-mode.outputs.mode == 'standalone'
         run: |
           INSTANCE_ID="${{ steps.get-instance.outputs.instance_id }}"
           DOMAIN="${{ github.event.inputs.domain }}"
@@ -61,7 +126,7 @@ jobs:
           echo "Dispatching Certbot SSL command to instance $INSTANCE_ID for domain $DOMAIN..."
 
           COMMAND_ID=$(aws ssm send-command \
-            --instance-ids $INSTANCE_ID \
+            --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --comment "Install Certbot Let's Encrypt SSL" \
             --parameters "commands=[
@@ -118,3 +183,18 @@ jobs:
           fi
 
           echo "🎉 Let's Encrypt SSL installed successfully for https://$DOMAIN!"
+
+      # 7. Automated End-to-End SSL Smoke Test
+      - name: Verify Live HTTPS Health Check (Smoke Test)
+        run: |
+          DOMAIN="${{ github.event.inputs.domain }}"
+          echo "Waiting 5 seconds for TLS propagation..."
+          sleep 5
+          echo "Testing live HTTPS endpoint: https://$DOMAIN..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L "https://$DOMAIN" || echo "000")
+          echo "Target HTTP Response: $STATUS"
+          if [ "$STATUS" -ne 200 ]; then
+            echo "::error::HTTPS health check failed! Expected HTTP 200, got $STATUS"
+            exit 1
+          fi
+          echo "🎉 End-to-End SSL Health Check Passed: https://$DOMAIN is 100% secure and active (HTTP 200)!"
