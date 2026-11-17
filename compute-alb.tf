@@ -54,10 +54,6 @@ EOF
   tags = {
     Name = "${var.project_name}-standalone-web"
   }
-
-  lifecycle {
-    create_before_destroy = true
-  }
 }
 
 # Static Elastic IP attached to the standalone web server

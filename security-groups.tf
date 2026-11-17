@@ -79,7 +79,7 @@
 # ==============================================================================
 resource "aws_security_group" "web" {
   name        = "${var.project_name}-web-sg"
-  description = "Firewall for WordPress standalone EC2 instance"
+  description = "Firewall for WordPress EC2 instances - chained strictly to ALB SG"
   vpc_id      = aws_vpc.main.id
 
   # ----------------------------------------------------------------------------
