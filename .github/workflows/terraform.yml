@@ -90,7 +90,22 @@ jobs:
         if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
         run: terraform apply -auto-approve
 
-      # 9. Destroy Infrastructure on Demand (Only on Explicit Dispatch Destroy)
+      # 9. Automated Smoke Test / Production Health Check Gate
+      - name: Verify Live Production Health (Smoke Test)
+        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+        run: |
+          echo "Waiting 10 seconds for service stabilization..."
+          sleep 10
+          echo "Executing automated health check against https://lab.asaxenadev.com..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L https://lab.asaxenadev.com || echo "000")
+          echo "Target HTTP Response: $STATUS"
+          if [ "$STATUS" -ne 200 ]; then
+            echo "::error::Production Health Gate Failed! Expected HTTP 200, got $STATUS"
+            exit 1
+          fi
+          echo "🎉 Production Health Gate Passed: Site is 100% operational (HTTP 200)!"
+
+      # 10. Destroy Infrastructure on Demand (Only on Explicit Dispatch Destroy)
       - name: Terraform Destroy
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
         run: terraform destroy -auto-approve

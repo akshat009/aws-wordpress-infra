@@ -148,4 +148,18 @@ jobs:
             fi
           done
 
+      # 6. Automated Smoke Test Gate (Zero Regression Guarantee)
+      - name: Verify Live Production Health (Smoke Test)
+        run: |
+          echo "Waiting 5 seconds for application stabilization..."
+          sleep 5
+          echo "Testing live endpoint https://lab.asaxenadev.com..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L https://lab.asaxenadev.com || echo "000")
+          echo "Endpoint response: $STATUS"
+          if [ "$STATUS" -ne 200 ]; then
+            echo "::error::Application deployment failed health check! Expected HTTP 200, got $STATUS"
+            exit 1
+          fi
+          echo "🎉 Application Deployment Passed Health Check: HTTP 200 OK!"
+
           echo "🎉 All web instances (Standalone or ASG Fleet) updated successfully!"

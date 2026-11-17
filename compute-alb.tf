@@ -39,7 +39,8 @@ resource "aws_instance" "web" {
   user_data_replace_on_change = false
 
   lifecycle {
-    ignore_changes = [user_data]
+    prevent_destroy = true
+    ignore_changes  = [user_data]
   }
 
   user_data = base64encode(<<-EOF
