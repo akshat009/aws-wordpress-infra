@@ -238,6 +238,12 @@ variable "enable_budget" {
 # Backup / maintenance times (UTC). Defaults = night time in India (IST = UTC+5:30);
 # move them to your own quiet hours.
 # ------------------------------------------------------------------------------
+variable "db_backup_retention_days" {
+  description = "Days to keep the database dumps that migrate-db.sh uploads to s3://<artifacts>/db-backups/ before every migration"
+  type        = number
+  default     = 30
+}
+
 variable "rds_backup_window" {
   description = "Daily RDS automatic backup window, UTC (hh24:mi-hh24:mi). Default 02:00-03:00 IST"
   type        = string

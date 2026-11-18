@@ -105,6 +105,8 @@ jobs:
       # 5. Run scripts/migrate-db.sh on the server through SSM Run Command.
       #    The script reads the DB password from SSM Parameter Store itself, so
       #    no secret ever passes through this workflow or the SSM command history.
+      #    Before overwriting anything it uploads dumps of BOTH databases to
+      #    s3://<project>-artifacts-<account>/db-backups/ (kept db_backup_retention_days).
       - name: Execute Migration via AWS SSM
         run: |
           INSTANCE_ID="${{ steps.get-instance.outputs.instance_id }}"
@@ -112,6 +114,9 @@ jobs:
           DIRECTION="${{ github.event.inputs.direction }}"
 
           SCRIPT_BASE64=$(base64 -w 0 scripts/migrate-db.sh)
+          # Off-server backups go to the private artifacts bucket (db-backups/)
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BACKUP_BUCKET="${PROJECT_NAME}-artifacts-${ACCOUNT_ID}"
 
           echo "Dispatching migration ($DIRECTION) to instance $INSTANCE_ID..."
 
@@ -123,7 +128,7 @@ jobs:
             --parameters "commands=[
               \"echo '$SCRIPT_BASE64' | base64 -d > /tmp/migrate-db.sh\",
               \"chmod +x /tmp/migrate-db.sh\",
-              \"/tmp/migrate-db.sh $DIRECTION $RDS_HOST $DB_PASSWORD_PARAM $AWS_REGION\",
+              \"/tmp/migrate-db.sh $DIRECTION $RDS_HOST $DB_PASSWORD_PARAM $AWS_REGION $BACKUP_BUCKET\",
               \"rm -f /tmp/migrate-db.sh\"
             ]" \
             --query "Command.CommandId" \
