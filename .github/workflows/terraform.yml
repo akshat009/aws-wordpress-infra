@@ -56,7 +56,7 @@ env:
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
   TF_VAR_domain_name: ${{ vars.DOMAIN_NAME || 'lab.asaxenadev.com' }}
-  TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+  TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }} # secret: masked as *** in public logs
 
 jobs:
   # ----------------------------------------------------------------------------

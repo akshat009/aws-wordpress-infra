@@ -12,7 +12,7 @@ on:
         required: true
         default: "lab.asaxenadev.com"
       email:
-        description: "Admin email for Let's Encrypt (leave empty to use the ALERT_EMAIL repo variable)"
+        description: "Admin email for Let's Encrypt (leave empty to use the ALERT_EMAIL repo secret)"
         required: false
         default: ""
 
@@ -136,10 +136,10 @@ jobs:
         run: |
           INSTANCE_ID="${{ steps.get-instance.outputs.instance_id }}"
           DOMAIN="${{ github.event.inputs.domain }}"
-          # Email comes from the form, or else the ALERT_EMAIL repo variable (never hard-coded)
-          EMAIL="${{ github.event.inputs.email || vars.ALERT_EMAIL }}"
+          # Email comes from the form, or else the ALERT_EMAIL repo secret (never hard-coded, masked in logs)
+          EMAIL="${{ github.event.inputs.email || secrets.ALERT_EMAIL }}"
           if [ -z "$EMAIL" ]; then
-            echo "::error::No email: enter one in the form or set the ALERT_EMAIL repository variable."
+            echo "::error::No email: enter one in the form or set the ALERT_EMAIL repository secret."
             exit 1
           fi
 
