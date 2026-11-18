@@ -237,4 +237,18 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
       days = 90
     }
   }
+
+  # Database dumps taken by scripts/migrate-db.sh before every migration
+  rule {
+    id     = "expire-db-backups"
+    status = "Enabled"
+
+    filter {
+      prefix = "db-backups/"
+    }
+
+    expiration {
+      days = var.db_backup_retention_days
+    }
+  }
 }

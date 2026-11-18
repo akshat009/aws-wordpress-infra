@@ -8,6 +8,7 @@ on:
       - main
     paths:
       - ".github/scripts/**"
+      - "scripts/**"
       - ".github/workflows/scripts-test.yml"
   workflow_dispatch:
 
@@ -56,7 +57,8 @@ jobs:
           sudo bash .github/scripts/nginx-site.sh "$DOMAIN"
           /tmp/check.sh 200 http://127.0.0.1/health.html
           /tmp/check.sh 200 http://127.0.0.1/                                  # no redirect without a cert
-          grep -q wordpress-ok /tmp/body && echo "PASS  PHP served"
+          grep -q wordpress-ok /tmp/body || { echo "FAIL  PHP served"; exit 1; }
+          echo "PASS  PHP served"
           /tmp/check.sh 200 -H "X-Forwarded-Proto: https" http://127.0.0.1/    # through the ALB
 
       - name: "Case 2: Let's Encrypt certificate present (live server today)"
@@ -71,10 +73,12 @@ jobs:
           /tmp/check.sh 200 http://127.0.0.1/health.html
           # Visitor through the ALB (ALB terminated HTTPS) -> served, no loop
           /tmp/check.sh 200 -H "X-Forwarded-Proto: https" -H "Host: $DOMAIN" http://127.0.0.1/
-          grep -q wordpress-ok /tmp/body && echo "PASS  PHP served behind ALB"
+          grep -q wordpress-ok /tmp/body || { echo "FAIL  PHP served behind ALB"; exit 1; }
+          echo "PASS  PHP served behind ALB"
           # Direct HTTP visitor on the Elastic IP -> 301 to HTTPS
           /tmp/check.sh 301 -H "Host: $DOMAIN" http://127.0.0.1/some/page
-          grep -qi "^location: https://$DOMAIN/some/page" <(curl -sI -H "Host: $DOMAIN" http://127.0.0.1/some/page) && echo "PASS  redirect target"
+          grep -qi "^location: https://$DOMAIN/some/page" <(curl -sI -H "Host: $DOMAIN" http://127.0.0.1/some/page) || { echo "FAIL  redirect target"; exit 1; }
+          echo "PASS  redirect target"
           # Let's Encrypt renewal challenge must not be redirected (200 via the
           # WordPress fallback here; certbot adds its own location when renewing)
           /tmp/check.sh 200 -H "Host: $DOMAIN" http://127.0.0.1/.well-known/acme-challenge/token
@@ -85,7 +89,8 @@ jobs:
         run: |
           sudo cp /etc/nginx/sites-available/default /tmp/before
           sudo bash .github/scripts/nginx-site.sh "$DOMAIN"
-          sudo diff /tmp/before /etc/nginx/sites-available/default && echo "PASS  same config"
+          sudo diff /tmp/before /etc/nginx/sites-available/default || { echo "FAIL  same config"; exit 1; }
+          echo "PASS  same config"
           /tmp/check.sh 200 http://127.0.0.1/health.html
 
       - name: "Case 4: a broken config is rolled back"
@@ -96,5 +101,104 @@ jobs:
           if sudo bash .github/scripts/nginx-site.sh "$DOMAIN"; then
             echo "FAIL  script should have failed"; exit 1
           fi
-          sudo diff /tmp/good /etc/nginx/sites-available/default && echo "PASS  previous config restored"
+          sudo diff /tmp/good /etc/nginx/sites-available/default || { echo "FAIL  previous config restored"; exit 1; }
+          echo "PASS  previous config restored"
           /tmp/check.sh 200 http://127.0.0.1/health.html
+
+  migrate-db:
+    name: "migrate-db.sh (backups before every overwrite)"
+    runs-on: ubuntu-latest
+    services:
+      # Stands in for RDS: a second, separate MySQL 8.4 server
+      rds:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: rootpw
+          MYSQL_DATABASE: wordpress
+          MYSQL_USER: wpuser
+          MYSQL_PASSWORD: testpass123
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -prootpw"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      FAKE_S3: /tmp/fake-s3
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up "local" MySQL, fake AWS CLI, wp-config.php
+        run: |
+          # Local MySQL (pre-installed on the runner; root password "root")
+          sudo systemctl start mysql
+          # Global [client] login for local root. Not ~/.my.cnf: MySQL reads that AFTER
+          # --defaults-extra-file, so it would override the script's RDS login.
+          printf '[client]\nuser=root\npassword=root\n' | sudo tee /etc/mysql/conf.d/zz-ci-root.cnf >/dev/null
+
+          # "RDS" = the service container, reached by its IP on the Docker network
+          RDS_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${{ job.services.rds.id }}")
+          echo "RDS_IP=$RDS_IP" >> "$GITHUB_ENV"
+
+          # Fake aws CLI: SSM returns the password; s3 cp copies to $FAKE_S3 (fails for bucket "broken-bucket")
+          sudo tee /usr/local/sbin/aws >/dev/null <<'EOF'
+          #!/bin/bash
+          case "$1 $2" in
+            "ssm get-parameter") echo "testpass123" ;;
+            "s3 cp")
+              args=(); for a in "$@"; do case "$a" in --*|s3|cp) ;; *) args+=("$a") ;; esac; done
+              # args = region, source, destination (flags and 's3 cp' removed)
+              src="${args[-2]}"; dst="${args[-1]}"
+              case "$dst" in s3://broken-bucket/*) echo "AccessDenied" >&2; exit 1 ;; esac
+              mkdir -p "/tmp/fake-s3/$(dirname "${dst#s3://}")"; cp "$src" "/tmp/fake-s3/${dst#s3://}" ;;
+            *) echo "fake aws: unsupported $*" >&2; exit 1 ;;
+          esac
+          EOF
+          sudo chmod +x /usr/local/sbin/aws
+
+          sudo mkdir -p /var/www/html
+          printf "<?php\ndefine( 'DB_NAME', 'wordpress' );\ndefine( 'DB_USER', 'wpuser' );\ndefine( 'DB_PASSWORD', 'old' );\ndefine( 'DB_HOST', 'localhost' );\n" | sudo tee /var/www/html/wp-config.php >/dev/null
+
+          # Seed: local has the real site, "RDS" has old data that will be overwritten
+          sudo mysql -e "CREATE DATABASE wordpress; CREATE TABLE wordpress.wp_posts (id INT PRIMARY KEY, title VARCHAR(50)); INSERT INTO wordpress.wp_posts VALUES (1,'local post 1'),(2,'local post 2');"
+          mysql -h "$RDS_IP" -uwpuser -ptestpass123 wordpress -e "CREATE TABLE wp_posts (id INT PRIMARY KEY, title VARCHAR(50)); INSERT INTO wp_posts VALUES (9,'old rds data');"
+
+      - name: "local-to-rds: backs up both sides to S3, then migrates"
+        run: |
+          sudo bash scripts/migrate-db.sh local-to-rds "$RDS_IP" /test/db/password ap-south-1 test-bucket
+          sudo find "$FAKE_S3" -type f | sort
+          SRC=$(sudo find "$FAKE_S3" -name '*local-to-rds_source-local.sql.gz')
+          BEFORE=$(sudo find "$FAKE_S3" -name '*local-to-rds_target-rds-before.sql.gz')
+          sudo zcat "$SRC" | grep -q "local post 2" || { echo "FAIL  source dump (local data) in S3"; exit 1; }
+          echo "PASS  source dump (local data) in S3"
+          sudo zcat "$BEFORE" | grep -q "old rds data" || { echo "FAIL  RDS-before dump (what got overwritten) in S3"; exit 1; }
+          echo "PASS  RDS-before dump (what got overwritten) in S3"
+          [ "$(mysql -h "$RDS_IP" -uwpuser -ptestpass123 -N wordpress -e 'SELECT COUNT(*) FROM wp_posts')" = "2" ] || { echo "FAIL  RDS now has the local data"; exit 1; }
+          echo "PASS  RDS now has the local data"
+          sudo grep -q "define( 'DB_HOST', '$RDS_IP' );" /var/www/html/wp-config.php || { echo "FAIL  wp-config points at RDS"; exit 1; }
+          echo "PASS  wp-config points at RDS"
+          [ "$(sudo ls /root/migration-backups | wc -l)" = "2" ] || { echo "FAIL  local copies kept"; exit 1; }
+          echo "PASS  local copies kept"
+
+      - name: "rds-to-local: backs up local before overwriting it"
+        run: |
+          mysql -h "$RDS_IP" -uwpuser -ptestpass123 wordpress -e "INSERT INTO wp_posts VALUES (3,'written on rds');"
+          sudo mysql -e "INSERT INTO wordpress.wp_posts VALUES (7,'stale local only');"
+          sudo bash scripts/migrate-db.sh rds-to-local "$RDS_IP" /test/db/password ap-south-1 test-bucket
+          BEFORE=$(sudo find "$FAKE_S3" -name '*rds-to-local_target-local-before.sql.gz')
+          sudo zcat "$BEFORE" | grep -q "stale local only" || { echo "FAIL  local-before dump in S3"; exit 1; }
+          echo "PASS  local-before dump in S3"
+          sudo mysql -N -e "SELECT title FROM wordpress.wp_posts WHERE id=3" | grep -q "written on rds" || { echo "FAIL  local now has the RDS data"; exit 1; }
+          echo "PASS  local now has the RDS data"
+          sudo grep -q "define( 'DB_HOST', 'localhost' );" /var/www/html/wp-config.php || { echo "FAIL  wp-config points at localhost"; exit 1; }
+          echo "PASS  wp-config points at localhost"
+
+      - name: "Upload fails: nothing is overwritten"
+        run: |
+          mysql -h "$RDS_IP" -uwpuser -ptestpass123 wordpress -e "INSERT INTO wp_posts VALUES (4,'must survive');"
+          sudo cp /var/www/html/wp-config.php /tmp/wpconfig-before
+          if sudo bash scripts/migrate-db.sh local-to-rds "$RDS_IP" /test/db/password ap-south-1 broken-bucket; then
+            echo "FAIL  script should have failed"; exit 1
+          fi
+          mysql -h "$RDS_IP" -uwpuser -ptestpass123 -N wordpress -e "SELECT title FROM wp_posts WHERE id=4" | grep -q "must survive" || { echo "FAIL  RDS untouched"; exit 1; }
+          echo "PASS  RDS untouched"
+          sudo diff /tmp/wpconfig-before /var/www/html/wp-config.php || { echo "FAIL  wp-config untouched"; exit 1; }
+          echo "PASS  wp-config untouched"

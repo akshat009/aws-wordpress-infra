@@ -67,6 +67,10 @@ run "standalone" {
   command = apply
   variables { architecture_mode = "standalone" }
   assert {
+    condition     = strcontains(aws_iam_policy.db_backups.policy, "/db-backups/*") && !strcontains(aws_iam_policy.db_backups.policy, "s3:DeleteObject")
+    error_message = "migration backup policy must be limited to db-backups/ and must not allow deletes"
+  }
+  assert {
     condition     = length(aws_instance.web) == 1 && length(aws_eip.web) == 1
     error_message = "standalone server missing"
   }

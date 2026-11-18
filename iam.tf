@@ -127,6 +127,38 @@ resource "aws_iam_role_policy_attachment" "runtime_config" {
 }
 
 # ------------------------------------------------------------------------------
+# 5b. Database migration backups (scripts/migrate-db.sh)
+# ------------------------------------------------------------------------------
+# Before a migration overwrites a database, the script uploads a dump of both
+# sides here, so the backups survive the server being deleted. Only this one
+# prefix; no delete permission (old backups expire by the lifecycle rule).
+resource "aws_iam_policy" "db_backups" {
+  name        = "${var.project_name}-db-backups-policy"
+  description = "Write and read database migration backups under db-backups/ in the artifacts bucket"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "WriteAndReadDatabaseBackups"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject"]
+        Resource = "${aws_s3_bucket.artifacts.arn}/db-backups/*"
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${var.project_name}-db-backups-policy"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "db_backups" {
+  role       = aws_iam_role.ec2.name
+  policy_arn = aws_iam_policy.db_backups.arn
+}
+
+# ------------------------------------------------------------------------------
 # 6. Instance Profile (the container that attaches the role to EC2)
 # ------------------------------------------------------------------------------
 resource "aws_iam_instance_profile" "ec2" {
