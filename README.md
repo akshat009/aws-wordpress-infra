@@ -62,10 +62,13 @@ Servers sit in public subnets, locked down by security groups, instead of privat
 ├── tests/               Offline terraform tests for every mode (mocked AWS)
 ├── scripts/migrate-db.sh                 Local MySQL ⇄ RDS migration (runs via SSM)
 ├── .github/scripts/configure-domain.py   Rebuilds wp-config.php during deploys
+├── .github/scripts/nginx-site.sh         Nginx site for the single server: works directly and behind the ALB
+├── .github/scripts/ssm-run.sh            Runs commands on a server through SSM and waits (used by workflows)
 ├── .github/workflows/
 │   ├── terraform.yml          fmt, validate, test, Checkov scan, plan → approved apply
 │   ├── deploy-app.yml         wp-content → S3 release + SSM deploy to all servers
-│   ├── install-ssl.yml        Certbot (standalone) or ACM check (enterprise)
+│   ├── install-ssl.yml        Let's Encrypt (no ALB) or ACM check (ALB) + ALB-ready Nginx site
+│   ├── scripts-test.yml       Tests nginx-site.sh on a real Nginx (PRs touching .github/scripts)
 │   └── migrate-database.yml   One-click local-to-rds / rds-to-local
 └── wp-content/          Theme and plugins deployed by deploy-app.yml
 ```
@@ -143,10 +146,12 @@ If `rds_deletion_protection = true`, set it to `false` before step 4.
 | :--- | :--- |
 | 1 server + local MySQL | `architecture_mode = "standalone"` |
 | 1 server + **RDS**, no load balancer | `standalone` + `enable_rds = true`, then run **Universal Database Migration** `local-to-rds` |
-| **Load balancer** in front of 1 server, local MySQL | `standalone` + `enable_alb = true`; DNS → `CNAME` to the ALB (see `dns_instructions`) |
+| **Load balancer** in front of 1 server, local MySQL | Run **Universal SSL Certificate Automation** once first (makes the server's Nginx ALB-ready), then `standalone` + `enable_alb = true`; DNS → `CNAME` to the ALB (see `dns_instructions`) |
 | Load balancer + 1 server + RDS | `standalone` + `enable_alb = true` + `enable_rds = true` |
 | Full enterprise (fleet) | `architecture_mode = "enterprise"` |
 | Fleet **without** RDS or ALB | **Rejected at plan time** (`terraform_data.feature_rules`): servers in a fleet must share one database |
+
+**Why run the SSL workflow before `enable_alb` on a server that has Let's Encrypt:** `certbot --redirect` made port 80 answer `301` for everything, but the ALB talks to the server on port 80, so its health check would fail and visitors would loop. The workflow rewrites the Nginx site so port 80 serves the ALB (requests with `X-Forwarded-Proto: https`) and `/health.html`, while direct HTTP visitors are still redirected to HTTPS.
 
 A new standalone server always installs local MySQL, but points WordPress at RDS when `enable_rds` is on, so it never starts with an empty database.
 
