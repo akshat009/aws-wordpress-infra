@@ -47,7 +47,8 @@ moved {
 # ------------------------------------------------------------------------------
 # Zero-spend budget: alerts as soon as ANY money is spent (a $0 / Free Tier setup
 # should cost nothing). Created in the console from the "Zero spend" template
-# before this project used Terraform; adopted with the import block below.
+# before this project used Terraform; adopted with an import block (removed
+# after the import was applied).
 # Alerts go through the same SNS topic as everything else.
 # ------------------------------------------------------------------------------
 resource "aws_budgets_budget" "zero_spend" {
@@ -68,13 +69,4 @@ resource "aws_budgets_budget" "zero_spend" {
   }
 
   depends_on = [aws_sns_topic_policy.alerts]
-}
-
-# Adopt the existing console budget instead of creating a duplicate.
-# for_each: only import when the budget is switched on (needs Terraform >= 1.7).
-# Remove this block in a follow-up PR once the apply has run.
-import {
-  for_each = var.enable_budget ? toset(["zero_spend"]) : toset([])
-  to       = aws_budgets_budget.zero_spend[0]
-  id       = "${local.account_id}:My Zero-Spend Budget"
 }

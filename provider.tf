@@ -6,7 +6,8 @@
 # ==============================================================================
 
 terraform {
-  # Minimum Terraform CLI version: 1.7 for import blocks with for_each (budget.tf).
+  # Minimum Terraform CLI version: 1.7 (import blocks with for_each, when adopting
+  # console-made resources; see the import runbook).
   required_version = ">= 1.7.0"
 
   required_providers {
