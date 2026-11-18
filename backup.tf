@@ -4,9 +4,9 @@
 # Description: AWS Backup plan that snapshots every resource tagged
 #              Backup = "daily" (the standalone server and RDS), kept 7 days.
 #
-# Off by default to keep the $0 promise. Turn on with enable_backups = true
-# (snapshot storage is usually under $1/month for this stack). Strongly
-# recommended in standalone mode, where the database lives on the server disk.
+# On by default (enable_backups = true): in standalone mode the only copy of the
+# database is on the server disk. Snapshot storage is usually under $1/month for
+# this stack. Set enable_backups = false to remove it.
 # ==============================================================================
 
 resource "aws_backup_vault" "main" {

@@ -217,9 +217,9 @@ variable "monthly_budget_usd" {
 }
 
 variable "enable_backups" {
-  description = "Daily AWS Backup snapshots of the standalone server and RDS, kept 7 days (small cost, usually under $1/month)"
+  description = "Daily AWS Backup snapshots of the standalone server and RDS, kept 7 days (small cost, usually under $1/month). On by default: the standalone server holds the only copy of the database"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "enable_alarms" {

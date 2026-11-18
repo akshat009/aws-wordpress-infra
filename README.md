@@ -57,7 +57,7 @@ Servers sit in public subnets, locked down by security groups, instead of privat
 ├── s3-cloudfront.tf     Media bucket (versioned) + CloudFront OAC; artifacts bucket
 ├── monitoring.tf        SNS topic, email subscription, CloudWatch alarms per mode
 ├── budget.tf            Monthly budget: alerts at 80% actual and 100% forecast
-├── backup.tf            AWS Backup daily plan (off by default: enable_backups)
+├── backup.tf            AWS Backup daily plan (on by default: enable_backups)
 ├── outputs.tf           Endpoints and IDs; mode-specific outputs return null when off
 ├── install.sh           First-boot setup for every server (reads password from SSM)
 ├── tests/               Offline terraform tests for every mode (mocked AWS)
@@ -156,7 +156,7 @@ If `rds_deletion_protection = true`, set it to `false` before step 4.
 | `enable_asg` | preset | Auto Scaling fleet (replaces the single server). **Requires `enable_alb` and `enable_rds`** |
 | `enable_alarms` | `true` | CloudWatch alarms (the SNS topic always exists) |
 | `enable_budget` | `true` | Monthly budget alerts |
-| `enable_backups` | `false` | Daily AWS Backup (tag `Backup = daily`) |
+| `enable_backups` | `true` | Daily AWS Backup (tag `Backup = daily`), kept 7 days |
 
 | Combination | How |
 | :--- | :--- |
