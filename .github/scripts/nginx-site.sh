@@ -68,10 +68,12 @@ ${SSL_OPTIONS}"
     # Redirect only when ALL three are true: plain HTTP, not from the ALB,
     # not the health check / Let's Encrypt challenge. ("if" can't combine
     # conditions, so each one adds a letter and only "HXU" redirects.)
+    # $request_uri (the original path), not $uri: WordPress's try_files
+    # fallback rewrites $uri to /index.php, and these rules run again after it.
     REDIRECT_BLOCK='    set $redirect_to_https "";
     if ($scheme = http) { set $redirect_to_https "H"; }
     if ($http_x_forwarded_proto != "https") { set $redirect_to_https "${redirect_to_https}X"; }
-    if ($uri !~ "^/(health\.html|\.well-known/acme-challenge/)") { set $redirect_to_https "${redirect_to_https}U"; }
+    if ($request_uri !~ "^/(health\.html|\.well-known/acme-challenge/)") { set $redirect_to_https "${redirect_to_https}U"; }
     if ($redirect_to_https = "HXU") { return 301 https://$host$request_uri; }'
 else
     echo "No certificate for $DOMAIN: plain HTTP site (the ALB or nothing handles HTTPS)"
