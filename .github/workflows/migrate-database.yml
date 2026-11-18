@@ -34,11 +34,12 @@ defaults:
     shell: bash
 
 env:
-  AWS_REGION: ap-south-1
-  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::538820337783:role/GitHubActionsTerraformRole' }}
-  DOMAIN_NAME: ${{ vars.DOMAIN_NAME || 'lab.asaxenadev.com' }}
-  PROJECT_NAME: wp-lab
-  DB_PASSWORD_PARAM: /wp-lab/db/password
+  # All from Settings > Secrets and variables > Actions > Variables (README: Repository variables)
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+  PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+  DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
+  DB_PASSWORD_PARAM: /${{ vars.PROJECT_NAME }}/db/password # same path as local.db_password_param in locals.tf
 
 jobs:
   migrate:
@@ -49,6 +50,9 @@ jobs:
       # 1. Checkout repository
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Check Repository Variables
+        run: bash .github/scripts/check-vars.sh AWS_REGION AWS_ROLE_ARN PROJECT_NAME DOMAIN_NAME
 
       # 2. Authenticate to AWS via OIDC (no static keys)
       - name: Configure AWS Credentials via OIDC
@@ -157,7 +161,7 @@ jobs:
           fi
 
       # 6. Health check through the standalone server's Elastic IP, so it works
-      #    whatever Hostinger DNS currently points at.
+      #    whatever the DNS record currently points at.
       - name: Verify Standalone Server Health (Smoke Test)
         run: |
           INSTANCE_ID="${{ steps.get-instance.outputs.instance_id }}"

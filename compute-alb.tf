@@ -89,7 +89,7 @@ EOF
   }
 }
 
-# Static Elastic IP for the standalone server (Hostinger "A" record points here)
+# Static Elastic IP for the standalone server (the DNS "A" record points here)
 resource "aws_eip" "web" {
   count = local.run_standalone ? 1 : 0
 

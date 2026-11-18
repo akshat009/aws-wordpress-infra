@@ -1,0 +1,7 @@
+# Copy to backend.hcl (git-ignored) for running Terraform on a laptop:
+#   terraform init -backend-config=backend.hcl
+# CI doesn't use this file: terraform.yml passes the same values from the
+# TF_STATE_BUCKET, TF_LOCK_TABLE and AWS_REGION repository variables.
+bucket         = "<PROJECT>-tfstate-<ACCOUNT_ID>"
+region         = "<REGION>"
+dynamodb_table = "<PROJECT>-tf-locks"

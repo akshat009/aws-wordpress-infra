@@ -55,8 +55,12 @@ override_resource {
 
 # Pin inputs that CI also passes as TF_VAR_* environment variables, so the tests
 # don't depend on repository settings (test-file values take precedence).
+# Pinned so CI settings (TF_VAR_* from repo variables/secrets) can't change test results
 variables {
-  alert_email = ""
+  alert_email  = ""
+  aws_region   = "ap-south-1"
+  project_name = "wp-lab"
+  domain_name  = "lab.asaxenadev.com"
 }
 
 run "standalone" {

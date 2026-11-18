@@ -15,7 +15,7 @@ resource "aws_db_subnet_group" "main" {
   count = local.run_rds ? 1 : 0
 
   name        = "${var.project_name}-db-subnet-group"
-  description = "Private database subnet group spanning Availability Zones ap-south-1a and ap-south-1b"
+  description = "Private database subnet group spanning Availability Zones ${var.aws_region}a and ${var.aws_region}b"
   subnet_ids  = [aws_subnet.private_1.id, aws_subnet.private_2.id]
 
   tags = {
@@ -68,8 +68,8 @@ resource "aws_db_instance" "wordpress" {
   # Availability & backups
   multi_az                   = var.rds_multi_az
   backup_retention_period    = var.rds_backup_retention_days
-  backup_window              = "20:30-21:30"         # UTC = 02:00-03:00 IST
-  maintenance_window         = "Sun:21:45-Sun:22:45" # UTC, after the backup window
+  backup_window              = var.rds_backup_window      # UTC
+  maintenance_window         = var.rds_maintenance_window # UTC, after the backup window
   copy_tags_to_snapshot      = true
   auto_minor_version_upgrade = true
 

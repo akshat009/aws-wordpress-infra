@@ -14,9 +14,9 @@ on:
   workflow_dispatch:
     inputs:
       domain:
-        description: "Domain name for SSL"
-        required: true
-        default: "lab.asaxenadev.com"
+        description: "Domain name for SSL (leave empty to use the DOMAIN_NAME repo variable)"
+        required: false
+        default: ""
       email:
         description: "Admin email for Let's Encrypt (leave empty to use the ALERT_EMAIL repo secret)"
         required: false
@@ -35,9 +35,11 @@ defaults:
     shell: bash
 
 env:
-  AWS_REGION: ap-south-1
-  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::538820337783:role/GitHubActionsTerraformRole' }}
-  PROJECT_NAME: wp-lab
+  # All from Settings > Secrets and variables > Actions > Variables (README: Repository variables)
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+  PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+  DOMAIN_NAME: ${{ github.event.inputs.domain || vars.DOMAIN_NAME }}
 
 jobs:
   ssl:
@@ -48,6 +50,9 @@ jobs:
       # 1. Checkout repository
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Check Repository Variables
+        run: bash .github/scripts/check-vars.sh AWS_REGION AWS_ROLE_ARN PROJECT_NAME DOMAIN_NAME
 
       # 2. Authenticate to AWS via OIDC (no static keys)
       - name: Configure AWS Credentials via OIDC
@@ -104,7 +109,7 @@ jobs:
       - name: Obtain Let's Encrypt Certificate via SSM
         if: steps.detect-mode.outputs.mode == 'standalone'
         run: |
-          DOMAIN="${{ github.event.inputs.domain }}"
+          DOMAIN="$DOMAIN_NAME"
           # Email comes from the form, or else the ALERT_EMAIL repo secret (never hard-coded, masked in logs)
           EMAIL="${{ github.event.inputs.email || secrets.ALERT_EMAIL }}"
           if [ -z "$EMAIL" ]; then
@@ -124,7 +129,7 @@ jobs:
       - name: Apply ALB-ready Nginx Site via SSM
         if: steps.get-instance.outputs.instance_id != ''
         run: |
-          DOMAIN="${{ github.event.inputs.domain }}"
+          DOMAIN="$DOMAIN_NAME"
           SCRIPT_B64=$(base64 -w 0 .github/scripts/nginx-site.sh)
 
           bash .github/scripts/ssm-run.sh "${{ steps.get-instance.outputs.instance_id }}" "ALB-ready Nginx site for $DOMAIN" \
@@ -177,7 +182,7 @@ jobs:
       # 8. End-to-end HTTPS smoke test
       - name: Verify Live HTTPS Health Check (Smoke Test)
         run: |
-          DOMAIN="${{ github.event.inputs.domain }}"
+          DOMAIN="$DOMAIN_NAME"
           STATUS=000
           for attempt in $(seq 1 6); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L --max-redirs 5 --max-time 15 "https://$DOMAIN/") || STATUS=000

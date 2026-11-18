@@ -58,16 +58,17 @@ variable "enable_asg" {
 # General Project & Environment Variables
 # ------------------------------------------------------------------------------
 
+# No defaults: these three are set per project, on Day 0.
+#   CI     : TF_VAR_* from the AWS_REGION / PROJECT_NAME / DOMAIN_NAME repository variables
+#   Laptop : terraform.tfvars (copy of terraform.tfvars.example)
 variable "aws_region" {
-  description = "AWS region where all resources are provisioned"
+  description = "AWS region where all resources are provisioned (e.g. ap-south-1)"
   type        = string
-  default     = "ap-south-1" # Asia Pacific (Mumbai)
 }
 
 variable "project_name" {
-  description = "Naming prefix applied to all resources, tags and security groups"
+  description = "Naming prefix applied to all resources, tags and security groups (e.g. wp-lab)"
   type        = string
-  default     = "wp-lab"
 }
 
 variable "environment" {
@@ -79,7 +80,6 @@ variable "environment" {
 variable "domain_name" {
   description = "Custom domain or subdomain for WordPress (CI sets this from the DOMAIN_NAME repo variable)"
   type        = string
-  default     = "lab.asaxenadev.com"
 }
 
 # ------------------------------------------------------------------------------
@@ -94,26 +94,26 @@ variable "vpc_cidr" {
 
 # Public subnets: ALB and web servers. ALBs require 2 subnets in 2 AZs.
 variable "public_subnet_1_cidr" {
-  description = "CIDR block for Public Subnet 1 (ap-south-1a)"
+  description = "CIDR block for Public Subnet 1 (AZ a of aws_region)"
   type        = string
   default     = "10.0.1.0/24"
 }
 
 variable "public_subnet_2_cidr" {
-  description = "CIDR block for Public Subnet 2 (ap-south-1b)"
+  description = "CIDR block for Public Subnet 2 (AZ b of aws_region)"
   type        = string
   default     = "10.0.2.0/24"
 }
 
 # Private subnets: RDS and Redis. No internet route at all.
 variable "private_subnet_1_cidr" {
-  description = "CIDR block for Private Subnet 1 (ap-south-1a)"
+  description = "CIDR block for Private Subnet 1 (AZ a of aws_region)"
   type        = string
   default     = "10.0.11.0/24"
 }
 
 variable "private_subnet_2_cidr" {
-  description = "CIDR block for Private Subnet 2 (ap-south-1b)"
+  description = "CIDR block for Private Subnet 2 (AZ b of aws_region)"
   type        = string
   default     = "10.0.12.0/24"
 }
@@ -232,4 +232,26 @@ variable "enable_budget" {
   description = "Monthly AWS budget with 80% actual / 100% forecast alerts"
   type        = bool
   default     = true
+}
+
+# ------------------------------------------------------------------------------
+# Backup / maintenance times (UTC). Defaults = night time in India (IST = UTC+5:30);
+# move them to your own quiet hours.
+# ------------------------------------------------------------------------------
+variable "rds_backup_window" {
+  description = "Daily RDS automatic backup window, UTC (hh24:mi-hh24:mi). Default 02:00-03:00 IST"
+  type        = string
+  default     = "20:30-21:30"
+}
+
+variable "rds_maintenance_window" {
+  description = "Weekly RDS maintenance window, UTC (ddd:hh24:mi-ddd:hh24:mi); must not overlap the backup window"
+  type        = string
+  default     = "Sun:21:45-Sun:22:45"
+}
+
+variable "backup_schedule" {
+  description = "AWS Backup daily schedule, cron in UTC (used when enable_backups = true). Default 02:30 IST"
+  type        = string
+  default     = "cron(0 21 * * ? *)"
 }

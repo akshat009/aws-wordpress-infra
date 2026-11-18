@@ -25,13 +25,16 @@ if [ ! -f /swapfile ]; then
     echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
 
-# 2. Inputs (defaults allow running by hand)
+# 2. Inputs. Terraform puts these exports in front of this script (compute-alb.tf,
+#    local.boot_env). Project-specific values have no default: running by hand
+#    needs them exported first, so a server can never boot with someone else's
+#    domain, region or password path.
+: "${DOMAIN_NAME:?DOMAIN_NAME must be set (Terraform boot_env)}"
+: "${AWS_REGION:?AWS_REGION must be set (Terraform boot_env)}"
+: "${DB_PASSWORD_PARAM:?DB_PASSWORD_PARAM must be set (Terraform boot_env)}"
 DB_NAME="${DB_NAME:-wordpress}"
 DB_USER="${DB_USER:-wpuser}"
 DB_HOST="${DB_HOST:-localhost}"
-DOMAIN_NAME="${DOMAIN_NAME:-lab.asaxenadev.com}"
-AWS_REGION="${AWS_REGION:-ap-south-1}"
-DB_PASSWORD_PARAM="${DB_PASSWORD_PARAM:-/wp-lab/db/password}"
 ARTIFACT_BUCKET="${ARTIFACT_BUCKET:-}"
 
 STANDALONE=false

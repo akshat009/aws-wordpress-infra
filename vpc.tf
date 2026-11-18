@@ -34,11 +34,11 @@ resource "aws_vpc" "main" {
 # AWS Application Load Balancers (ALBs) enforce a strict architectural prerequisite:
 # They must span at least TWO subnets across TWO Availability Zones for High Availability.
 
-# Public Subnet 1: Located in Mumbai Datacenter A (ap-south-1a)
+# Public Subnet 1: Availability Zone "a" of var.aws_region
 resource "aws_subnet" "public_1" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = var.public_subnet_1_cidr # 10.0.1.0/24 (251 usable IPs)
-  availability_zone = "${var.aws_region}a"     # ap-south-1a
+  availability_zone = "${var.aws_region}a"     # e.g. ap-south-1a
 
   # map_public_ip_on_launch = true: Any resource placed here receives a public IPv4 address.
   map_public_ip_on_launch = true
@@ -49,11 +49,11 @@ resource "aws_subnet" "public_1" {
   }
 }
 
-# Public Subnet 2: Located in Mumbai Datacenter B (ap-south-1b)
+# Public Subnet 2: Availability Zone "b" of var.aws_region
 resource "aws_subnet" "public_2" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = var.public_subnet_2_cidr # 10.0.2.0/24 (251 usable IPs)
-  availability_zone       = "${var.aws_region}b"     # ap-south-1b
+  availability_zone       = "${var.aws_region}b"     # e.g. ap-south-1b
   map_public_ip_on_launch = true
 
   tags = {
@@ -69,11 +69,11 @@ resource "aws_subnet" "public_2" {
 # These subnets host our Amazon RDS MySQL 8.0 instance and ElastiCache Redis cluster.
 # By omitting 'map_public_ip_on_launch', instances here can NEVER receive a public IP.
 
-# Private Subnet 1: Located in Mumbai Datacenter A (ap-south-1a)
+# Private Subnet 1: Availability Zone "a" of var.aws_region
 resource "aws_subnet" "private_1" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = var.private_subnet_1_cidr # 10.0.11.0/24 (251 usable IPs)
-  availability_zone = "${var.aws_region}a"      # ap-south-1a
+  availability_zone = "${var.aws_region}a"      # e.g. ap-south-1a
 
   tags = {
     Name = "${var.project_name}-private-1"
@@ -81,12 +81,12 @@ resource "aws_subnet" "private_1" {
   }
 }
 
-# Private Subnet 2: Located in Mumbai Datacenter B (ap-south-1b)
+# Private Subnet 2: Availability Zone "b" of var.aws_region
 # Required by Amazon RDS DB Subnet Groups (which mandate at least 2 AZs for failover).
 resource "aws_subnet" "private_2" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = var.private_subnet_2_cidr # 10.0.12.0/24 (251 usable IPs)
-  availability_zone = "${var.aws_region}b"      # ap-south-1b
+  availability_zone = "${var.aws_region}b"      # e.g. ap-south-1b
 
   tags = {
     Name = "${var.project_name}-private-2"

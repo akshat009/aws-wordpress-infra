@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars (git-ignored) for running Terraform on a laptop.
+# CI doesn't use this file: terraform.yml passes the same values from the
+# AWS_REGION, PROJECT_NAME and DOMAIN_NAME repository variables (TF_VAR_*).
+aws_region   = "<REGION>"      # e.g. ap-south-1
+project_name = "<PROJECT>"     # e.g. wp-lab
+domain_name  = "<SITE_DOMAIN>" # e.g. blog.example.com
