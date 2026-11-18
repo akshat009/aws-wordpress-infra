@@ -29,6 +29,32 @@ variable "architecture_mode" {
 }
 
 # ------------------------------------------------------------------------------
+# Individual feature switches (override the architecture_mode preset)
+# ------------------------------------------------------------------------------
+# null (default) = follow the preset above. true/false = force that feature on/off.
+# Examples:
+#   architecture_mode = "standalone", enable_rds = true  -> 1 server + RDS, no load balancer
+#   architecture_mode = "standalone", enable_alb = true  -> load balancer in front of 1 server
+#   enable_asg = true needs enable_alb and enable_rds (checked at plan time, see locals.tf)
+variable "enable_rds" {
+  description = "Force RDS on/off. null = follow architecture_mode."
+  type        = bool
+  default     = null
+}
+
+variable "enable_alb" {
+  description = "Force the Application Load Balancer + ACM HTTPS on/off (works with a single server too). null = follow architecture_mode."
+  type        = bool
+  default     = null
+}
+
+variable "enable_asg" {
+  description = "Force the Auto Scaling fleet on/off (replaces the single server; needs enable_alb and enable_rds). null = follow architecture_mode."
+  type        = bool
+  default     = null
+}
+
+# ------------------------------------------------------------------------------
 # General Project & Environment Variables
 # ------------------------------------------------------------------------------
 
@@ -194,4 +220,16 @@ variable "enable_backups" {
   description = "Daily AWS Backup snapshots of the standalone server and RDS, kept 7 days (small cost, usually under $1/month)"
   type        = bool
   default     = false
+}
+
+variable "enable_alarms" {
+  description = "CloudWatch alarms (auto-recovery, CPU, ALB, RDS). The SNS alert topic always exists."
+  type        = bool
+  default     = true
+}
+
+variable "enable_budget" {
+  description = "Monthly AWS budget with 80% actual / 100% forecast alerts"
+  type        = bool
+  default     = true
 }

@@ -126,6 +126,30 @@ If `rds_deletion_protection = true`, set it to `false` before step 4.
 
 ---
 
+## Turning features on individually
+
+`architecture_mode` is a **preset**. Each feature can also be switched on/off on its own in `variables.tf`; a switch left at `null` follows the preset.
+
+| Switch | Default | Turns on/off |
+| :--- | :--- | :--- |
+| `enable_rds` | preset | Amazon RDS (MySQL 8.4) |
+| `enable_alb` | preset | Application Load Balancer + ACM certificate + HTTPS listener. Works in front of the **single server** too |
+| `enable_asg` | preset | Auto Scaling fleet (replaces the single server). **Requires `enable_alb` and `enable_rds`** |
+| `enable_alarms` | `true` | CloudWatch alarms (the SNS topic always exists) |
+| `enable_budget` | `true` | Monthly budget alerts |
+| `enable_backups` | `false` | Daily AWS Backup (tag `Backup = daily`) |
+
+| Combination | How |
+| :--- | :--- |
+| 1 server + local MySQL | `architecture_mode = "standalone"` |
+| 1 server + **RDS**, no load balancer | `standalone` + `enable_rds = true`, then run **Universal Database Migration** `local-to-rds` |
+| **Load balancer** in front of 1 server, local MySQL | `standalone` + `enable_alb = true`; DNS → `CNAME` to the ALB (see `dns_instructions`) |
+| Load balancer + 1 server + RDS | `standalone` + `enable_alb = true` + `enable_rds = true` |
+| Full enterprise (fleet) | `architecture_mode = "enterprise"` |
+| Fleet **without** RDS or ALB | **Rejected at plan time** (`terraform_data.feature_rules`): servers in a fleet must share one database |
+
+A new standalone server always installs local MySQL, but points WordPress at RDS when `enable_rds` is on, so it never starts with an empty database.
+
 ## Security model
 
 - **No SSH:** port 22 is closed; shell access and deploys go through SSM.
