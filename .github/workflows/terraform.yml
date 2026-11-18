@@ -1,9 +1,10 @@
 name: "Terraform GitOps CI/CD"
 
-# Pull request -> validate, security scan and plan (review only, nothing changes)
+# Pull request -> validate, security scan and plan (review only, nothing changes).
+#                 Runs on EVERY PR: "Validate, Scan & Plan" is a required status check
+#                 in branch protection, so it must report on every PR or merging is blocked.
 # Push to main -> plan, then apply in the "production" environment
-#                 (add required reviewers in Settings > Environments > production
-#                  to get a manual approval gate before every apply)
+#                 (required reviewer set in Settings > Environments > production)
 on:
   push:
     branches:
@@ -16,11 +17,6 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - "**.tf"
-      - "install.sh"
-      - "tests/**"
-      - ".github/workflows/terraform.yml"
   workflow_dispatch:
     inputs:
       action:
