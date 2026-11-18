@@ -1,218 +1,222 @@
 # ==============================================================================
 # File: outputs.tf
-# Tier: Project Return Values (Outputs)
-# Description: Exposes critical resource IDs, endpoints, and attributes.
+# Tier: Return Values
+# Description: Resource IDs and endpoints. Mode-specific outputs return null
+#              when that part of the architecture is switched off, so this file
+#              never needs editing when architecture_mode changes.
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# Tier: Step 1 - Networking Return Values
+# Architecture
 # ------------------------------------------------------------------------------
+output "architecture_mode" {
+  description = "Which architecture is currently deployed"
+  value       = var.architecture_mode
+}
 
+output "wordpress_url" {
+  description = "Public web URL of the WordPress site"
+  value       = "https://${var.domain_name}"
+}
+
+# Where traffic actually lands: the Elastic IP in standalone/migrating mode, the
+# ALB DNS name in enterprise mode. Used by the pipeline's smoke test.
+output "app_endpoint" {
+  description = "Elastic IP (standalone/migrating) or ALB DNS name (enterprise)"
+  value       = local.run_fleet ? one(aws_lb.main[*].dns_name) : one(aws_eip.web[*].public_ip)
+}
+
+output "dns_instructions" {
+  description = "What the Hostinger DNS record for the site should be right now"
+  value = local.run_fleet ? (
+    "CNAME  ${split(".", var.domain_name)[0]}  ->  ${one(aws_lb.main[*].dns_name)}"
+    ) : (
+    "A  ${split(".", var.domain_name)[0]}  ->  ${one(aws_eip.web[*].public_ip)}"
+  )
+}
+
+# ------------------------------------------------------------------------------
+# Networking
+# ------------------------------------------------------------------------------
 output "vpc_id" {
-  description = "The unique AWS resource identifier of the provisioned custom VPC"
+  description = "ID of the custom VPC"
   value       = aws_vpc.main.id
 }
 
 output "vpc_cidr_block" {
-  description = "The primary IPv4 address block allocated to the custom VPC"
+  description = "Primary IPv4 CIDR block of the VPC"
   value       = aws_vpc.main.cidr_block
 }
 
 output "public_subnet_ids" {
-  description = "List of Public Subnet IDs"
+  description = "Public subnet IDs (ALB and web servers)"
   value       = [aws_subnet.public_1.id, aws_subnet.public_2.id]
 }
 
 output "private_subnet_ids" {
-  description = "List of Private Subnet IDs"
+  description = "Private subnet IDs (RDS and Redis)"
   value       = [aws_subnet.private_1.id, aws_subnet.private_2.id]
 }
 
 output "internet_gateway_id" {
-  description = "The unique AWS resource identifier of the attached Internet Gateway"
+  description = "ID of the Internet Gateway"
   value       = aws_internet_gateway.gw.id
 }
 
 # ------------------------------------------------------------------------------
-# Tier: Step 2 - Security Group Return Values
+# Security Groups
 # ------------------------------------------------------------------------------
-
 output "alb_security_group_id" {
-  description = "Security group ID attached to the Application Load Balancer"
+  description = "Security group ID of the Application Load Balancer"
   value       = aws_security_group.alb.id
 }
 
 output "web_security_group_id" {
-  description = "Security group ID attached to the WordPress EC2 instance"
+  description = "Security group ID of the WordPress servers"
   value       = aws_security_group.web.id
 }
 
 output "db_security_group_id" {
-  description = "Security group ID attached to Amazon RDS MySQL"
+  description = "Security group ID of Amazon RDS MySQL"
   value       = aws_security_group.db.id
 }
 
 output "redis_security_group_id" {
-  description = "Security group ID attached to Amazon ElastiCache Redis"
+  description = "Security group ID reserved for ElastiCache Redis"
   value       = aws_security_group.redis.id
 }
 
 # ------------------------------------------------------------------------------
-# Tier: Step 3 - IAM Return Values
+# IAM
 # ------------------------------------------------------------------------------
-
 output "ec2_iam_role_name" {
-  description = "Name of the IAM Role attached to WordPress EC2 instance"
+  description = "Name of the IAM role used by WordPress servers"
   value       = aws_iam_role.ec2.name
 }
 
 output "ec2_iam_role_arn" {
-  description = "ARN of the IAM Role attached to WordPress EC2 instance"
+  description = "ARN of the IAM role used by WordPress servers"
   value       = aws_iam_role.ec2.arn
 }
 
 output "ec2_instance_profile_name" {
-  description = "Name of the IAM Instance Profile attached to WordPress instance"
+  description = "Name of the instance profile attached to WordPress servers"
   value       = aws_iam_instance_profile.ec2.name
 }
 
 output "ec2_instance_profile_arn" {
-  description = "ARN of the IAM Instance Profile attached to WordPress instance"
+  description = "ARN of the instance profile attached to WordPress servers"
   value       = aws_iam_instance_profile.ec2.arn
 }
 
 # ------------------------------------------------------------------------------
-# Tier: Step 4 - Relational Database Return Values [COMMENTED OUT FOR STANDALONE]
+# Secrets (location only - never the value)
 # ------------------------------------------------------------------------------
-# ==============================================================================
-# 🏢 PROFESSIONAL PRODUCTION SETUP:
-# In an enterprise setup, outputs expose the RDS endpoint, address, and credentials
-# for downstream microservices, monitoring agents, and CI/CD database migrations.
-#
-# 💡 STANDALONE / BUDGET MODE:
-# Commented out because MySQL runs locally (localhost) inside the standalone EC2.
-# ==============================================================================
-# output "rds_endpoint" {
-#   description = "The connection endpoint for the Amazon RDS MySQL database (Host:Port)"
-#   value       = aws_db_instance.wordpress.endpoint
-# }
-#
-# output "rds_address" {
-#   description = "The DNS hostname address of the RDS MySQL database"
-#   value       = aws_db_instance.wordpress.address
-# }
-#
-# output "rds_port" {
-#   description = "The database listening port (default MySQL: 3306)"
-#   value       = aws_db_instance.wordpress.port
-# }
-#
-# output "rds_database_name" {
-#   description = "The initial MySQL database name"
-#   value       = aws_db_instance.wordpress.db_name
-# }
-#
-# output "rds_username" {
-#   description = "Master administrative username for database connections"
-#   value       = aws_db_instance.wordpress.username
-# }
+output "db_password_ssm_parameter" {
+  description = "SSM Parameter Store name holding the DB password (read with: aws ssm get-parameter --with-decryption)"
+  value       = aws_ssm_parameter.db_password.name
+}
 
 # ------------------------------------------------------------------------------
-# Tier: Step 6 - Compute & Application Load Balancer Return Values [COMMENTED OUT]
-# ------------------------------------------------------------------------------
-# ==============================================================================
-# 🏢 PROFESSIONAL PRODUCTION SETUP:
-# In an enterprise setup, outputs provide the dynamic ALB DNS endpoint, ARN,
-# and Auto Scaling Group name to configure Route 53 Aliases and CI/CD fleet deploys.
-#
-# 💡 STANDALONE / BUDGET MODE:
-# Replaced with the static Elastic IP of the standalone EC2 instance.
-# ==============================================================================
-# output "alb_dns_name" {
-#   description = "The public dynamic DNS endpoint of the Application Load Balancer"
-#   value       = aws_lb.main.dns_name
-# }
-#
-# output "alb_arn" {
-#   description = "The Amazon Resource Name (ARN) of the Application Load Balancer"
-#   value       = aws_lb.main.arn
-# }
-#
-# output "target_group_arn" {
-#   description = "The Amazon Resource Name (ARN) of the ALB Target Group"
-#   value       = aws_lb_target_group.web.arn
-# }
-#
-# output "autoscaling_group_name" {
-#   description = "Name of the Auto Scaling Group managing WordPress web servers"
-#   value       = aws_autoscaling_group.web.name
-# }
-
-# ------------------------------------------------------------------------------
-# Standalone Single-Server Outputs
+# Standalone mode (null in enterprise mode)
 # ------------------------------------------------------------------------------
 output "wordpress_public_ip" {
-  description = "Static Elastic IP address of the standalone WordPress EC2 instance"
-  value       = aws_eip.web.public_ip
+  description = "Elastic IP of the standalone server"
+  value       = one(aws_eip.web[*].public_ip)
 }
 
-output "wordpress_url" {
-  description = "🎉 Public web URL to access WordPress in your browser"
-  value       = "https://${var.domain_name}"
+output "standalone_instance_id" {
+  description = "Instance ID of the standalone server"
+  value       = one(aws_instance.web[*].id)
 }
 
 # ------------------------------------------------------------------------------
-# Tier: Step 5 - S3 Media Storage & CloudFront CDN Return Values
+# Database (null in standalone mode)
 # ------------------------------------------------------------------------------
+output "rds_endpoint" {
+  description = "RDS connection endpoint (host:port)"
+  value       = one(aws_db_instance.wordpress[*].endpoint)
+}
 
+output "rds_address" {
+  description = "RDS hostname"
+  value       = one(aws_db_instance.wordpress[*].address)
+}
+
+# ------------------------------------------------------------------------------
+# Enterprise fleet (null unless enterprise mode)
+# ------------------------------------------------------------------------------
+output "alb_dns_name" {
+  description = "Public DNS name of the Application Load Balancer"
+  value       = one(aws_lb.main[*].dns_name)
+}
+
+output "alb_arn" {
+  description = "ARN of the Application Load Balancer"
+  value       = one(aws_lb.main[*].arn)
+}
+
+output "target_group_arn" {
+  description = "ARN of the ALB target group"
+  value       = one(aws_lb_target_group.web[*].arn)
+}
+
+output "autoscaling_group_name" {
+  description = "Name of the Auto Scaling Group"
+  value       = one(aws_autoscaling_group.web[*].name)
+}
+
+# ------------------------------------------------------------------------------
+# SSL certificate (migrating + enterprise)
+# ------------------------------------------------------------------------------
+output "acm_certificate_arn" {
+  description = "ARN of the ACM certificate"
+  value       = one(aws_acm_certificate.cert[*].arn)
+}
+
+output "acm_dns_validation_records" {
+  description = "CNAME record(s) to add in Hostinger so ACM can issue the certificate"
+  value = local.request_certificate ? [
+    for dvo in aws_acm_certificate.cert[0].domain_validation_options : {
+      name   = dvo.resource_record_name
+      type   = dvo.resource_record_type
+      record = dvo.resource_record_value
+    }
+  ] : []
+}
+
+# ------------------------------------------------------------------------------
+# Storage & CDN
+# ------------------------------------------------------------------------------
 output "s3_media_bucket_name" {
-  description = "The globally unique name of the S3 media bucket"
+  description = "Name of the S3 media bucket (enter in WP Offload Media)"
   value       = aws_s3_bucket.media.id
 }
 
 output "s3_media_bucket_arn" {
-  description = "The Amazon Resource Name (ARN) of the S3 media bucket"
+  description = "ARN of the S3 media bucket"
   value       = aws_s3_bucket.media.arn
 }
 
 output "cloudfront_distribution_id" {
-  description = "The unique identifier of the CloudFront CDN distribution"
+  description = "ID of the CloudFront distribution"
   value       = aws_cloudfront_distribution.media.id
 }
 
 output "cloudfront_distribution_domain_name" {
-  description = "The global domain name of the CloudFront CDN distribution"
+  description = "CloudFront domain for media (enter in WP Offload Media > Delivery)"
   value       = aws_cloudfront_distribution.media.domain_name
 }
 
+output "artifacts_bucket_name" {
+  description = "S3 bucket holding app releases (wp-content)"
+  value       = aws_s3_bucket.artifacts.id
+}
+
 # ------------------------------------------------------------------------------
-# Tier: Step 7 - SSL / Domain Return Values [COMMENTED OUT FOR STANDALONE]
+# Monitoring
 # ------------------------------------------------------------------------------
-# ==============================================================================
-# 🏢 PROFESSIONAL PRODUCTION SETUP:
-# In an enterprise setup with an ALB, outputs expose ACM certificate validation
-# CNAME records for Route 53 or external DNS validation.
-#
-# 💡 STANDALONE / BUDGET MODE:
-# ACM is not used in standalone EC2 mode; SSL is managed via Certbot inside the VM.
-# ==============================================================================
-# output "acm_certificate_arn" {
-#   description = "The ARN of the AWS ACM SSL Certificate"
-#   value       = aws_acm_certificate.cert.arn
-# }
-#
-# output "acm_certificate_status" {
-#   description = "Current validation status of the ACM Certificate"
-#   value       = aws_acm_certificate.cert.status
-# }
-#
-# output "acm_dns_validation_records" {
-#   description = "DNS CNAME records required by Hostinger to validate the SSL certificate"
-#   value = [
-#     for dvo in aws_acm_certificate.cert.domain_validation_options : {
-#       name   = dvo.resource_record_name
-#       type   = dvo.resource_record_type
-#       record = dvo.resource_record_value
-#     }
-#   ]
-# }
+output "alerts_sns_topic_arn" {
+  description = "SNS topic receiving all alarms and budget alerts"
+  value       = aws_sns_topic.alerts.arn
+}

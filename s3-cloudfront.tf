@@ -1,22 +1,25 @@
 # ==============================================================================
 # File: s3-cloudfront.tf
-# Tier: Step 5 - S3 Media Storage & CloudFront CDN with Origin Access Control (OAC)
-# Description: Provisions a hardened, zero-public-access S3 bucket for WordPress
-#              media uploads (/wp-content/uploads), a CloudFront CDN edge distribution,
-#              modern Origin Access Control (OAC), and least-privilege bucket policy.
+# Tier: Object Storage & CDN (always on, every mode)
+# Description: 1) Private S3 media bucket + CloudFront CDN with Origin Access
+#                 Control (WordPress uploads via WP Offload Media).
+#              2) Private S3 artifacts bucket holding app releases (wp-content)
+#                 so new Auto Scaling servers get the theme/plugins at boot.
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# 1. Caller Identity Lookup
+# 1. Caller Identity Lookup (account ID for globally unique bucket names)
 # ------------------------------------------------------------------------------
 data "aws_caller_identity" "current" {}
 
+# ==============================================================================
+# MEDIA BUCKET + CLOUDFRONT
+# ==============================================================================
+
 # ------------------------------------------------------------------------------
-# 2. S3 Media Bucket (Stateless Compute Decoupling)
+# 2. S3 Media Bucket
 # ------------------------------------------------------------------------------
-# In a horizontally scaled auto-scaling architecture, EC2 instances are ephemeral.
-# If WordPress stores media on local disk, new instances will lack uploaded images.
-# This bucket offloads all media attachments permanently into object storage.
+# Servers are disposable; uploads must live outside them.
 resource "aws_s3_bucket" "media" {
   bucket        = "${var.project_name}-media-${data.aws_caller_identity.current.account_id}"
   force_destroy = false
@@ -27,10 +30,8 @@ resource "aws_s3_bucket" "media" {
 }
 
 # ------------------------------------------------------------------------------
-# 3. S3 Public Access Block (Zero Direct Public Ingress)
+# 3. Block all direct public access (only CloudFront can read)
 # ------------------------------------------------------------------------------
-# Enforces enterprise security posture: public users CANNOT access S3 directly.
-# All public requests MUST be routed through CloudFront CDN with edge caching.
 resource "aws_s3_bucket_public_access_block" "media" {
   bucket = aws_s3_bucket.media.id
 
@@ -41,7 +42,7 @@ resource "aws_s3_bucket_public_access_block" "media" {
 }
 
 # ------------------------------------------------------------------------------
-# 4. S3 Server-Side Encryption (At-Rest Protection)
+# 4. Encryption at rest
 # ------------------------------------------------------------------------------
 resource "aws_s3_bucket_server_side_encryption_configuration" "media" {
   bucket = aws_s3_bucket.media.id
@@ -54,9 +55,42 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "media" {
 }
 
 # ------------------------------------------------------------------------------
-# 5. S3 CORS Configuration (Cross-Origin Asset Sharing)
+# 5. Versioning + lifecycle (recover overwritten or deleted media)
 # ------------------------------------------------------------------------------
-# Allows web browsers loading pages from our domain or ALB to fetch fonts/images.
+# A deleted or overwritten file stays recoverable for 30 days, then the old
+# version is removed so storage cost doesn't grow forever.
+resource "aws_s3_bucket_versioning" "media" {
+  bucket = aws_s3_bucket.media.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "media" {
+  bucket = aws_s3_bucket.media.id
+
+  rule {
+    id     = "expire-old-versions"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.media]
+}
+
+# ------------------------------------------------------------------------------
+# 6. CORS (browsers loading pages from our domain can fetch fonts/images)
+# ------------------------------------------------------------------------------
 resource "aws_s3_bucket_cors_configuration" "media" {
   bucket = aws_s3_bucket.media.id
 
@@ -70,11 +104,8 @@ resource "aws_s3_bucket_cors_configuration" "media" {
 }
 
 # ------------------------------------------------------------------------------
-# 6. CloudFront Origin Access Control (OAC)
+# 7. CloudFront Origin Access Control (modern replacement for OAI)
 # ------------------------------------------------------------------------------
-# Modern AWS standard (replacing legacy Origin Access Identity - OAI).
-# Signs requests from CloudFront to S3 using SigV4 and cryptographically verifies
-# that only this specific CloudFront distribution can fetch objects from S3.
 resource "aws_cloudfront_origin_access_control" "media" {
   name                              = "${var.project_name}-media-oac"
   description                       = "Origin Access Control for WordPress S3 media bucket"
@@ -84,10 +115,8 @@ resource "aws_cloudfront_origin_access_control" "media" {
 }
 
 # ------------------------------------------------------------------------------
-# 7. CloudFront CDN Distribution (Global Edge Caching)
+# 8. CloudFront CDN Distribution
 # ------------------------------------------------------------------------------
-# Delivers media assets from 600+ Points of Presence (PoPs) worldwide.
-# Reduces latency, eliminates load on EC2/ALB, and dramatically lowers bandwidth costs.
 resource "aws_cloudfront_distribution" "media" {
   enabled             = true
   is_ipv6_enabled     = true
@@ -107,11 +136,11 @@ resource "aws_cloudfront_distribution" "media" {
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
 
-    # AWS Managed Cache Policy: Managed-CachingOptimized (ID: 658327ea-f89d-4fab-a63d-7e88639e58f6)
+    # AWS Managed Cache Policy: Managed-CachingOptimized
     cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
   }
 
-  price_class = "PriceClass_100" # Cost-effective: US, Canada, Europe, Asia
+  price_class = "PriceClass_100" # US, Canada, Europe, Asia
 
   restrictions {
     geo_restriction {
@@ -129,9 +158,10 @@ resource "aws_cloudfront_distribution" "media" {
 }
 
 # ------------------------------------------------------------------------------
-# 8. S3 Bucket Policy (Restricted to CloudFront Distribution)
+# 9. Bucket policy: only this CloudFront distribution may read objects
 # ------------------------------------------------------------------------------
-# Grants s3:GetObject permission ONLY to the CloudFront distribution via OAC.
+# Note: CloudFront can read EVERY path in this bucket, so never store backups
+# or other private files here.
 resource "aws_s3_bucket_policy" "media" {
   bucket = aws_s3_bucket.media.id
 
@@ -156,4 +186,55 @@ resource "aws_s3_bucket_policy" "media" {
   })
 
   depends_on = [aws_s3_bucket_public_access_block.media]
+}
+
+# ==============================================================================
+# ARTIFACTS BUCKET (application releases)
+# ==============================================================================
+# deploy-app.yml uploads wp-content as:
+#   releases/latest.tar.gz              <- new servers download this at boot
+#   releases/history/<git-sha>.tar.gz   <- kept 90 days for rollback
+resource "aws_s3_bucket" "artifacts" {
+  bucket        = "${var.project_name}-artifacts-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true # Only rebuildable release files live here
+
+  tags = {
+    Name = "${var.project_name}-artifacts-bucket"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "artifacts" {
+  bucket = aws_s3_bucket.artifacts.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "artifacts" {
+  bucket = aws_s3_bucket.artifacts.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
+  bucket = aws_s3_bucket.artifacts.id
+
+  rule {
+    id     = "expire-release-history"
+    status = "Enabled"
+
+    filter {
+      prefix = "releases/history/"
+    }
+
+    expiration {
+      days = 90
+    }
+  }
 }

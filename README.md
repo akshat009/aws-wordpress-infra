@@ -1,170 +1,156 @@
-# ☁️ AWS Decoupled WordPress Infrastructure (Terraform)
+# AWS WordPress Infrastructure (Terraform)
 
-Pure Infrastructure as Code (IaC) repository for provisioning an enterprise-grade, highly available, multi-tier decoupled WordPress stack on Amazon Web Services (AWS) in `ap-south-1` (Mumbai).
+Infrastructure as Code for WordPress on AWS (`ap-south-1`, Mumbai). One codebase, three architecture modes, switched by a single Terraform variable:
+
+| `architecture_mode` | What runs | Approx. cost |
+| :--- | :--- | :--- |
+| `standalone` (default) | 1 EC2 + local MySQL + Elastic IP + Let's Encrypt | ~$0 on Free Tier, ~$12/month after |
+| `migrating` | Standalone keeps serving **plus** RDS and the ACM certificate (used while moving data) | standalone + RDS |
+| `enterprise` | ALB + Auto Scaling Group (2 AZs) + RDS MySQL 8.4 + ACM (TLS 1.3) | ~$65–75/month on-demand |
+
+These layers are on in every mode: custom VPC, chained security groups, SSM instead of SSH, private S3 media behind CloudFront (OAC), secrets in SSM Parameter Store, CloudWatch alarms, a monthly budget alert and keyless GitHub Actions (OIDC).
+
+Prices are rough on-demand estimates; check the AWS Pricing Calculator.
 
 ---
 
-## 🏛️ High-Level Architecture Overview
+## Architecture
 
 ```text
-                                  Internet (0.0.0.0/0)
-                                           │
-                                           ▼ HTTPS (443) / HTTP (80)
-                         [ Application Load Balancer (ALB) ]
-                         (Multi-AZ: ap-south-1a & ap-south-1b)
-                         (Security Group: wp-lab-alb-sg)
-                                           │
-                                           ▼ Port 80 (Chained Security Group)
-                      [ Auto Scaling EC2 WordPress Web Fleet ]
-                      (Stateless Compute Tier - No Local Database)
-                      (Security Group: wp-lab-web-sg | Port 22 SSH ELIMINATED)
-                                           │
-                     ┌─────────────────────┴─────────────────────┐
-                     │ Port 3306 (MySQL)                         │ Port 6379 (Redis)
-                     ▼                                           ▼
-         [ Amazon RDS MySQL 8.0 ]                     [ ElastiCache Redis 7.x ]
-       (Private Subnets: 10.0.11.0/24)              (Private Subnets: 10.0.12.0/24)
-       (SG: wp-lab-db-sg <- web-sg only)            (SG: wp-lab-redis-sg <- web-sg only)
-                     │
-                     ▼ Media Uploads (IAM Role / Zero Keys)
-       [ Amazon S3 Media Bucket ] <──── [ Amazon CloudFront CDN (OAC) ]
+                         Internet
+                            │
+          ┌─────────────────┴──────────────────┐
+   standalone / migrating                  enterprise
+          │                                     │
+   Elastic IP (A record)              ALB :80→301, :443 TLS 1.3 (CNAME)
+          │                                     │  port 80 from alb-sg only
+   EC2 (Nginx, PHP, MySQL)            Auto Scaling Group (1–4 × EC2, 2 AZs)
+          │                                     │  CPU target tracking
+          │                                     ▼
+          │                          RDS MySQL 8.4 (private subnets, encrypted)
+          │                                     ▲
+          └──── migrating: both exist ──────────┘  (migrate-database.yml copies data)
+
+   Always on: S3 media ← CloudFront (OAC) · SSM Parameter Store (DB password)
+              S3 artifacts (app releases) · SNS alerts · CloudWatch alarms · AWS Budget
 ```
 
+Servers sit in public subnets, locked down by security groups, instead of private subnets behind a NAT gateway. This is a deliberate cost trade-off: each NAT gateway costs ~$33–45/month.
+
 ---
 
-## 📂 Comprehensive File-by-File Code Explanation
-
-Every file in this repository is strictly modularized following HashiCorp standard conventions:
+## Repository layout
 
 ```text
-aws-wordpress-infra/
+.
+├── provider.tf          Terraform + provider versions, S3 backend with DynamoDB lock
+├── variables.tf         All settings. architecture_mode switch is at the top
+├── locals.tf            Turns architecture_mode into run_standalone / run_rds / run_fleet flags
+├── vpc.tf               VPC, 2 public + 2 private subnets, IGW, route tables
+├── security-groups.tf   ALB, web, DB and Redis security groups (web rules follow the mode)
+├── iam.tf               EC2 role: SSM, CloudWatch, S3 media, DB password + releases (read-only)
+├── secrets.tf           Generated DB password stored as an SSM SecureString
+├── compute-alb.tf       Standalone EC2 + EIP, or ALB + launch template + ASG + scaling policy
+├── rds.tf               RDS MySQL 8.4 (encrypted, 7-day backups, final snapshot)
+├── ssl.tf               ACM certificate (requested in migrating) + HTTPS listener (enterprise)
+├── s3-cloudfront.tf     Media bucket (versioned) + CloudFront OAC; artifacts bucket
+├── monitoring.tf        SNS topic, email subscription, CloudWatch alarms per mode
+├── budget.tf            Monthly budget: alerts at 80% actual and 100% forecast
+├── backup.tf            AWS Backup daily plan (off by default: enable_backups)
+├── outputs.tf           Endpoints and IDs; mode-specific outputs return null when off
+├── install.sh           First-boot setup for every server (reads password from SSM)
+├── tests/               Offline terraform tests for every mode (mocked AWS)
+├── scripts/migrate-db.sh                 Local MySQL ⇄ RDS migration (runs via SSM)
+├── .github/scripts/configure-domain.py   Rebuilds wp-config.php during deploys
 ├── .github/workflows/
-│   ├── terraform.yml       # Passwordless GitOps Infrastructure CI/CD via IAM OIDC
-│   └── deploy-app.yml      # Zero-Trust Application Code Deployment via AWS SSM
-├── .gitignore              # Ignores local notes, sensitive state files, and caches
-├── provider.tf             # Terraform binary requirements, AWS Provider & S3 Remote State
-├── variables.tf            # Parameterized CIDR blocks, regions, environments, and tags
-├── vpc.tf                  # Step 1: Multi-AZ Custom VPC, Subnets, IGW, and Route Tables
-├── security-groups.tf      # Step 2: 4 Chained Firewalls (ALB, Web, DB, Redis)
-├── iam.tf                  # Step 3: EC2 IAM Role, SSM, CloudWatch, S3 Policy & Instance Profile
-├── rds.tf                  # Step 4: Multi-AZ Subnet Group & Managed Amazon RDS MySQL 8.0
-├── compute-alb.tf          # Step 6: Application Load Balancer & Multi-AZ Auto Scaling EC2 Fleet
-├── outputs.tf              # Exported resource IDs consumed by downstream tiers
-├── install.sh              # EC2 cloud-init bootstrap script (Nginx, PHP, WordPress)
-├── wp-content/             # Application code and assets deployed via CI/CD
-│   ├── plugins/            # WordPress custom plugins
-│   └── themes/             # WordPress custom themes
-│       └── wp-lab-theme/   # Custom responsive child theme
-└── README.md               # Repository documentation and architectural guide
+│   ├── terraform.yml          fmt, validate, test, Checkov scan, plan → approved apply
+│   ├── deploy-app.yml         wp-content → S3 release + SSM deploy to all servers
+│   ├── install-ssl.yml        Certbot (standalone) or ACM check (enterprise)
+│   └── migrate-database.yml   One-click local-to-rds / rds-to-local
+└── wp-content/          Theme and plugins deployed by deploy-app.yml
 ```
 
 ---
 
-### 1. `provider.tf` — Foundation & Remote State Backend
-- **Role:** Connects Terraform to AWS APIs, locks engine versions, and stores infrastructure state securely in the cloud.
-- **Key Code Blocks:**
-  1. `required_version = ">= 1.5.0"`: Enforces modern Terraform HCL2 syntax and prevents older CLI versions from running.
-  2. `required_providers { aws = { version = "~> 5.0" } }`: Pins AWS Provider to version 5.x, allowing minor bugfixes while blocking breaking major upgrades (v6.x).
-  3. `backend "s3"`:
-     - `bucket = "wp-lab-tfstate-538820337783"`: Stores `terraform.tfstate` centrally in S3 so GitHub Actions runners and team members share one single source of truth.
-     - `dynamodb_table = "wp-lab-tf-locks"`: Provides distributed state locking using DynamoDB. If two jobs run simultaneously, one is locked out to prevent state corruption.
-     - `encrypt = true`: Enforces AES-256 server-side encryption at rest.
-  4. `provider "aws"` + `default_tags`: Automatically applies tags (`Project = "wp-lab"`, `Environment = "lab"`, `ManagedBy = "Terraform"`) to **every single resource**, fulfilling Phase 11 AWS Cost Explorer tracking requirements.
+## One-time setup
+
+**Day 0 (AWS console, once):** S3 state bucket, DynamoDB lock table (`LockID`), GitHub OIDC provider and `GitHubActionsTerraformRole`. Terraform can't create its own backend.
+
+**GitHub repository settings:**
+
+| Setting | Where | Value |
+| :--- | :--- | :--- |
+| `AWS_ROLE_ARN` | Settings → Secrets and variables → Actions → Variables | `arn:aws:iam::<ACCOUNT_ID>:role/GitHubActionsTerraformRole` |
+| `DOMAIN_NAME` | same | e.g. `lab.asaxenadev.com` |
+| `ALERT_EMAIL` | same | Email for alarms and budget alerts |
+| Approval gate | Settings → Environments → `production` → Required reviewers | Add yourself |
+
+Workflows fall back to the current account and domain if the variables aren't set. Without `ALERT_EMAIL` no email subscription is created. After the first apply, AWS sends a confirmation email that you must click.
 
 ---
 
-### 2. `variables.tf` — Parameterized Input Variables
-- **Role:** Eliminates hardcoded values across the codebase, allowing easy environment replication (e.g., dev, staging, prod) by changing variables.
-- **Key Code Blocks:**
-  1. `aws_region`: Target region, defaulting to `ap-south-1` (Mumbai).
-  2. `project_name` & `environment`: Prefixes for naming resources (`wp-lab`, `lab`).
-  3. `vpc_cidr`: Master network block (`10.0.0.0/16` = 65,536 private IP addresses).
-  4. `public_subnet_1_cidr` (`10.0.1.0/24`) & `public_subnet_2_cidr` (`10.0.2.0/24`): Dual public subnets across Availability Zones `ap-south-1a` and `ap-south-1b` for ALB High Availability.
-  5. `private_subnet_1_cidr` (`10.0.11.0/24`) & `private_subnet_2_cidr` (`10.0.12.0/24`): Dual isolated private subnets for RDS MySQL and ElastiCache Redis.
+## Day-to-day flow
+
+1. Branch → change code → open a PR into `main`.
+2. `terraform.yml` runs `fmt`, `validate`, `terraform test`, a Checkov scan and `plan`. The plan summary appears on the run page, with a warning if anything would be deleted or replaced.
+3. Merge → plan runs again → the **apply** job waits for approval in the `production` environment → apply → smoke test against the new endpoint.
+4. Changes under `wp-content/` trigger `deploy-app.yml`. It publishes the release to S3 (for servers launched later) and deploys to every running server through SSM.
 
 ---
 
-### 3. `vpc.tf` — Step 1: Isolated Networking Tier
-- **Role:** Provisions the virtual private network and partitions it into public and private security zones across multiple datacenters.
-- **Key Code Blocks:**
-  1. `aws_vpc.main`: Isolated custom VPC (`10.0.0.0/16`). `enable_dns_hostnames = true` ensures EC2 and RDS instances receive internal AWS DNS endpoints.
-  2. `aws_subnet.public_1` & `aws_subnet.public_2`: Public subnets across 2 AZs with `map_public_ip_on_launch = true`. Hosts the public-facing ALB.
-  3. `aws_subnet.private_1` & `aws_subnet.private_2`: Private subnets across 2 AZs with `map_public_ip_on_launch = false`. Completely unreachable from the public internet; hosts database and cache instances.
-  4. `aws_internet_gateway.gw`: The virtual doorway connecting the VPC to the internet.
-  5. `aws_route_table.public` & `aws_route_table_association`: Route `0.0.0.0/0 -> aws_internet_gateway.gw.id`. What makes a subnet "Public" is this explicit route pointing to an Internet Gateway!
+## Switching architecture modes
+
+Change one line in [`variables.tf`](variables.tf) (`architecture_mode` → `default`) and merge. Always go through `migrating`; it's the only stage where both databases exist.
+
+### Upgrade: standalone → enterprise
+
+1. **`architecture_mode = "migrating"`** → merge. RDS and the ACM certificate are created; the site keeps running on the standalone server.
+2. Add the CNAME from the `acm_dns_validation_records` output to Hostinger DNS.
+3. Make sure every plugin you installed from WP admin is committed in `wp-content/plugins/`. Plugins on a server's disk don't reach new servers.
+4. Copy any media that isn't in S3 yet (uploads made before WP Offload Media was set up) into the media bucket.
+5. Run **Universal Database Migration** → `local-to-rds`. The standalone server now uses RDS.
+6. **`architecture_mode = "enterprise"`** → merge. The ALB, ASG and HTTPS listener are created and the standalone server is deleted. Its data is already in RDS.
+7. Hostinger: replace the `lab` A record with the CNAME shown in the `dns_instructions` output.
+8. Run **Deploy WordPress Application Code** once. Optionally run **Universal SSL Certificate Automation** to confirm ACM shows *Issued*.
+
+Expect a few minutes of downtime between step 6 and DNS propagation in step 7.
+
+### Downgrade: enterprise → standalone
+
+1. **`architecture_mode = "migrating"`** → merge. The ALB and ASG are removed and a fresh standalone server is created with an empty local database. **The site is down from here until step 3.**
+2. Run **Universal Database Migration** → `rds-to-local`.
+3. Hostinger: point the `lab` A record at the `dns_instructions` IP, then run **Universal SSL Certificate Automation**.
+4. **`architecture_mode = "standalone"`** → merge. RDS is deleted after a final snapshot (`wp-lab-db-final-*`). Delete old snapshots by hand when you no longer need them, because they cost money.
+
+If `rds_deletion_protection = true`, set it to `false` before step 4.
 
 ---
 
-### 4. `security-groups.tf` — Step 2: Chained Hypervisor Firewalls
-- **Role:** Enforces zero-trust defense-in-depth perimeter security using **Security Group Chaining** (referencing SG IDs instead of vulnerable IP CIDRs).
-- **Key Code Blocks:**
-  1. `aws_security_group.alb` (`wp-lab-alb-sg`):
-     - Inbound: Port 80 (HTTP) & Port 443 (HTTPS) open to `0.0.0.0/0` (Global Internet).
-     - Outbound: All traffic (`-1`) to forward requests to web instances.
-  2. `aws_security_group.web` (`wp-lab-web-sg`):
-     - Inbound: Port 80 **ONLY from `aws_security_group.alb.id`** (`security_groups = [aws_security_group.alb.id]`). Public internet CANNOT access web instances directly!
-     - Inbound: **Port 22 (SSH) is completely removed!** Management is performed via AWS SSM Session Manager.
-     - Outbound: Open to `0.0.0.0/0` for SSM agent, S3 uploads, and Ubuntu security patches.
-  3. `aws_security_group.db` (`wp-lab-db-sg`):
-     - Inbound: Port 3306 (MySQL) **ONLY from `aws_security_group.web.id`**.
-     - Outbound: None. Database never initiates outbound connections.
-  4. `aws_security_group.redis` (`wp-lab-redis-sg`):
-     - Inbound: Port 6379 (Redis) **ONLY from `aws_security_group.web.id`**.
-     - Outbound: None. In-memory cache never initiates outbound connections.
+## Security model
+
+- **No SSH:** port 22 is closed; shell access and deploys go through SSM.
+- **No static keys:** GitHub Actions uses OIDC; servers use an IAM role with IMDSv2 required.
+- **No secrets in code or user data:** the DB password is generated by Terraform and stored in SSM Parameter Store. Servers and `migrate-db.sh` read it at runtime.
+- **Least privilege:** the DB accepts 3306 only from `web-sg`; in enterprise mode `web-sg` accepts 80 only from `alb-sg`; the media bucket is readable only by its CloudFront distribution.
+- **Encryption at rest:** S3 (SSE-S3), RDS, fleet root volumes, SSM SecureString.
+- **Protection of the standalone server:** `ignore_changes = [ami, user_data]` stops accidental replacement. Deletion happens only through the deliberate mode switch, and only after plan review and approval.
 
 ---
 
-### 5. `outputs.tf` — Exported Return Values
-- **Role:** Functions like return values in programming. Exposes provisioned AWS IDs so downstream modules (RDS, ALB, EC2, CloudFront) can dynamically bind to them without hardcoding.
-- **Key Outputs:**
-  - `vpc_id` & `vpc_cidr_block`
-  - `public_subnet_ids` (List of both public subnets for ALB)
-  - `private_subnet_ids` (List of both private subnets for RDS DB Subnet Group)
-  - `alb_security_group_id`, `web_security_group_id`, `db_security_group_id`, `redis_security_group_id`
+## Testing locally
+
+```bash
+terraform init -backend=false
+terraform test        # mocked AWS: checks every mode builds the right resources
+terraform fmt -check -recursive
+```
 
 ---
 
-### 6. `install.sh` — Cloud-Init Web Bootstrap Script
-- **Role:** Automated user-data bash script that runs automatically on the first boot of any new EC2 instance in the Auto Scaling Group.
-- **Key Stages:**
-  1. Creates 2GB swap space (`/swapfile`) to prevent out-of-memory crashes on `t3.micro`.
-  2. Installs Nginx, PHP-FPM, PHP extensions (`php-mysql`, `php-gd`, `php-xml`, `php-zip`, etc.), and MySQL client non-interactively.
-  3. Downloads and extracts latest official WordPress release to `/var/www/html`.
-  4. Configures Nginx virtual host with FastCGI socket proxying to PHP-FPM.
-  5. Configures ownership (`www-data:www-data`) and permissions (`755` directories, `644` files, `640` `wp-config.php`).
+## Known limitations / next steps
 
----
-
-### 7. `.github/workflows/terraform.yml` — Passwordless GitOps Pipeline
-- **Role:** Continuous Integration and Continuous Deployment (CI/CD) engine powered by GitHub Actions.
-- **Key Workflow Features:**
-  1. **Passwordless AWS IAM OIDC (`aws-actions/configure-aws-credentials`):** Authenticates to AWS using short-lived cryptographically signed GitHub JWT tokens. **Zero static `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` are stored in GitHub Secrets!**
-  2. **Automated Dry Run on Pull Request (`terraform plan`):** When code is pushed to a PR, it validates HCL syntax and generates a detailed dry run so engineers can review planned changes before touching AWS.
-  3. **Automated Deployment on Main Merge (`terraform apply -auto-approve`):** Automatically provisions the infrastructure once PR is merged into `main`.
-  4. **Manual Teardown On-Demand (`workflow_dispatch` -> `destroy`):** Allows instant ₹0.00 cloud teardown from the GitHub UI to prevent idle cloud costs.
-
----
-
-### 8. `.gitignore` — Version Control Protection
-- **Role:** Prevents accidental commits of sensitive files to GitHub.
-- **Protected Patterns:**
-  - `**/.terraform/*`: Local provider plugins and engine caches.
-  - `*.tfstate` & `*.tfstate.*`: Infrastructure state (kept safely in remote S3).
-  - `*.tfvars`: Local secret parameter files.
-  - `crash.log`: Debug crash logs.
-
----
-
-## 🚀 Branching Model & GitOps Workflow
-
-Following enterprise DevOps best practices, this repository uses a **Dev-to-Main GitOps flow**:
-1. All local development happens on the **`dev`** branch:
-   ```bash
-   git checkout dev
-   # write and test code...
-   git commit -m "feat(infra): add step 3 IAM roles"
-   git push origin dev
-   ```
-2. Open a Pull Request from `dev` into `main`.
-3. GitHub Actions triggers `terraform plan` (Dry Run).
-4. Upon approval and merge into `main`, GitHub Actions automatically runs `terraform apply`.
+- ElastiCache Redis: only the security group exists.
+- CloudWatch Agent (memory and disk metrics) is permitted by IAM but not installed.
+- WP Offload Media bucket and CloudFront settings are still entered in WP admin.
+- One AWS account and one environment; no WAF.
+- The Terraform deploy role has broad permissions; scope it down for real production.

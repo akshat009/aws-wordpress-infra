@@ -1,17 +1,17 @@
 # ==============================================================================
 # File: iam.tf
-# Tier: Step 3 - Zero-Trust Identity, Session Manager & Instance Profile
-# Description: Provisions the IAM Role, Instance Profile, and least-privilege
-#              policy attachments for EC2 instances. Eliminates Port 22 (SSH)
-#              in favor of AWS Systems Manager (SSM) Session Manager, grants
-#              CloudWatch Unified Agent permissions, and authorizes S3 media uploads.
+# Tier: Zero-Trust Identity, Session Manager & Instance Profile
+# Description: IAM role + instance profile for the WordPress servers. Replaces
+#              SSH with SSM Session Manager, allows the CloudWatch Agent, and
+#              grants least-privilege access to the media bucket, the DB
+#              password parameter and the app release bucket. No access keys.
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
 # 1. EC2 Assume Role Trust Policy
 # ------------------------------------------------------------------------------
-# In Phase 6, we learned that EC2 instances should never possess static AWS API keys.
-# Instead, the instance assumes a temporary IAM Role directly via AWS STS metadata service.
+# Servers get short-lived credentials from the metadata service (IMDSv2),
+# never static access keys.
 resource "aws_iam_role" "ec2" {
   name = "${var.project_name}-ec2-role"
 
@@ -34,36 +34,24 @@ resource "aws_iam_role" "ec2" {
 }
 
 # ------------------------------------------------------------------------------
-# 2. AWS Systems Manager (SSM) Policy Attachment
+# 2. SSM Session Manager (replaces SSH; port 22 stays closed)
 # ------------------------------------------------------------------------------
-# Why AmazonSSMManagedInstanceCore?
-# In Phase 6 (Zero-Trust Hardening), we completely deleted Port 22 (SSH) inbound rules.
-# This policy allows the EC2 instance to communicate with the AWS Systems Manager service
-# over outbound HTTPS (Port 443). Administrators connect to server terminals directly
-# from the AWS Console or AWS CLI (`aws ssm start-session`) without opening any inbound ports!
 resource "aws_iam_role_policy_attachment" "ssm" {
   role       = aws_iam_role.ec2.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
 # ------------------------------------------------------------------------------
-# 3. CloudWatch Unified Agent Policy Attachment
+# 3. CloudWatch Agent (RAM / disk metrics and logs, once the agent is installed)
 # ------------------------------------------------------------------------------
-# In Phase 7 (Monitoring & Observability), we installed the CloudWatch agent.
-# By default, AWS EC2 hypervisors cannot see internal OS metrics like RAM usage or disk space.
-# This policy allows the CloudWatch Agent on Ubuntu to push custom RAM, disk, and swap metrics
-# as well as Nginx/PHP error logs directly to Amazon CloudWatch.
 resource "aws_iam_role_policy_attachment" "cloudwatch" {
   role       = aws_iam_role.ec2.name
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 
 # ------------------------------------------------------------------------------
-# 4. Custom Least-Privilege Policy: S3 Media Storage
+# 4. Least-privilege S3 media access (WP Offload Media)
 # ------------------------------------------------------------------------------
-# In Phase 5, WordPress offloads media uploads (/wp-content/uploads) to an Amazon S3 bucket.
-# Instead of granting full S3 admin access, this policy adheres strictly to the Principle
-# of Least Privilege: instances can only read, write, and delete files inside wp-lab-media buckets.
 resource "aws_iam_policy" "s3_media" {
   name        = "${var.project_name}-s3-media-policy"
   description = "Grants EC2 WordPress web servers least-privilege access to media uploads S3 bucket"
@@ -98,11 +86,49 @@ resource "aws_iam_role_policy_attachment" "s3_media" {
 }
 
 # ------------------------------------------------------------------------------
-# 5. IAM Instance Profile (Bridge Container)
+# 5. Runtime configuration: DB password (SSM) + app releases (S3), read-only
 # ------------------------------------------------------------------------------
-# In AWS, an IAM Role cannot be attached directly to an EC2 instance.
-# AWS requires an "Instance Profile", which acts as an IAM container that holds the role.
-# In Step 6, this instance profile will be referenced inside aws_launch_template.web.
+resource "aws_iam_policy" "runtime_config" {
+  name        = "${var.project_name}-runtime-config-policy"
+  description = "Read-only access to the DB password parameter and app release bundles"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ReadProjectParameters"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter/${var.project_name}/*"
+      },
+      {
+        Sid      = "ReadAppReleases"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.artifacts.arn}/releases/*"
+      },
+      {
+        Sid      = "ListAppReleases"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.artifacts.arn
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${var.project_name}-runtime-config-policy"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "runtime_config" {
+  role       = aws_iam_role.ec2.name
+  policy_arn = aws_iam_policy.runtime_config.arn
+}
+
+# ------------------------------------------------------------------------------
+# 6. Instance Profile (the container that attaches the role to EC2)
+# ------------------------------------------------------------------------------
 resource "aws_iam_instance_profile" "ec2" {
   name = "${var.project_name}-ec2-instance-profile"
   role = aws_iam_role.ec2.name

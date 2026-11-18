@@ -1,5 +1,9 @@
 name: "Terraform GitOps CI/CD"
 
+# Pull request -> validate, security scan and plan (review only, nothing changes)
+# Push to main -> plan, then apply in the "production" environment
+#                 (add required reviewers in Settings > Environments > production
+#                  to get a manual approval gate before every apply)
 on:
   push:
     branches:
@@ -7,6 +11,7 @@ on:
     paths:
       - "**.tf"
       - "install.sh"
+      - "tests/**"
       - ".github/workflows/terraform.yml"
   pull_request:
     branches:
@@ -14,6 +19,7 @@ on:
     paths:
       - "**.tf"
       - "install.sh"
+      - "tests/**"
       - ".github/workflows/terraform.yml"
   workflow_dispatch:
     inputs:
@@ -35,77 +41,200 @@ permissions:
   id-token: write # Required for requesting the OIDC JWT token from GitHub
   contents: read  # Required for actions/checkout to read repo contents
 
+# Never run two Terraform jobs against the same state at once (prevents the
+# stale DynamoDB lock problem); queued runs wait instead of being cancelled.
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash # bash -eo pipefail
+
+env:
+  AWS_REGION: ap-south-1
+  # Set these in Settings > Secrets and variables > Actions > Variables.
+  # The fallbacks keep the pipeline working until you do.
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::538820337783:role/GitHubActionsTerraformRole' }}
+  TF_VERSION: 1.10.0
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_VAR_domain_name: ${{ vars.DOMAIN_NAME || 'lab.asaxenadev.com' }}
+  TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+
 jobs:
-  terraform:
-    name: "Terraform Plan & Apply"
+  # ----------------------------------------------------------------------------
+  # 1. Validate, scan and plan (runs on every PR and push)
+  # ----------------------------------------------------------------------------
+  plan:
+    name: "Validate, Scan & Plan"
+    if: github.event.inputs.action != 'destroy'
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout repository code
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Inspect OIDC Token Claims (Debug)
-      - name: Inspect OIDC Token Claims
-        run: |
-          TOKEN=$(curl -sLS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" -H "User-Agent: actions/runner" -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}")
-          JWT=$(echo $TOKEN | jq -r '.value')
-          echo "=== Decoded OIDC JWT Payload ==="
-          echo $JWT | cut -d. -f2 | base64 -d 2>/dev/null | jq '{iss, aud, sub, repository, repository_owner, ref, event_name}'
-
-      # 3. Authenticate to AWS via OIDC (Zero Static Keys!)
       - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::538820337783:role/GitHubActionsTerraformRole
-          aws-region: ap-south-1
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
-      # 4. Setup Terraform CLI on the runner
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.10.0
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
 
-      # 5. Initialize Terraform against Remote S3 Backend + DynamoDB Lock
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive -diff
+
       - name: Terraform Init
         run: terraform init
 
-      # 5b. Force-unlock stale lock if requested
       - name: Force Unlock Stale Lock
         if: github.event.inputs.lock_id != ''
         run: terraform force-unlock -force "${{ github.event.inputs.lock_id }}"
 
-      # 6. Validate HCL Syntax
       - name: Terraform Validate
         run: terraform validate
 
-      # 7. Generate Execution Plan (Only if NOT destroy)
+      # Offline tests (mocked AWS) proving each architecture_mode builds the right resources
+      - name: Terraform Test
+        run: terraform test
+
+      # Static security scan (report only; findings appear in the job log)
+      - name: Security Scan (Checkov)
+        run: pipx run checkov --directory . --framework terraform --compact --quiet --soft-fail
+
       - name: Terraform Plan
-        if: github.event.inputs.action != 'destroy'
-        run: terraform plan -no-color
-
-      # 8. Apply Changes Automatically (On Push to Main or Dispatch Apply)
-      - name: Terraform Apply
-        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
-        run: terraform apply -auto-approve
-
-      # 9. Automated Smoke Test / Production Health Check Gate
-      - name: Verify Live Production Health (Smoke Test)
-        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
         run: |
-          echo "Waiting 10 seconds for service stabilization..."
-          sleep 10
-          echo "Executing automated health check against https://lab.asaxenadev.com..."
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L https://lab.asaxenadev.com || echo "000")
-          echo "Target HTTP Response: $STATUS"
-          if [ "$STATUS" -ne 200 ]; then
-            echo "::error::Production Health Gate Failed! Expected HTTP 200, got $STATUS"
+          terraform plan -no-color -out=tfplan | tee plan.txt
+
+          {
+            MODE=$(awk '/variable "architecture_mode"/,/^}/' variables.tf | grep -oP 'default\s*=\s*"\K[a-z]+' || echo unknown)
+            echo "### Terraform plan (architecture_mode: $MODE)"
+            echo '```'
+            grep -E '^\s+# .* (will be|must be)|^Plan:|^No changes' plan.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if grep -qE 'will be destroyed|must be replaced' plan.txt; then
+            echo "::warning::This plan DELETES or REPLACES resources. Review it before approving the apply."
+          fi
+
+  # ----------------------------------------------------------------------------
+  # 2. Apply (push to main, or manual "apply") - gated by the production environment
+  # ----------------------------------------------------------------------------
+  apply:
+    name: "Apply to Production"
+    needs: plan
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -no-color
+
+      # Gate: the server Terraform just built must answer for the domain.
+      # curl --resolve sends the request straight to the new endpoint (Elastic IP
+      # or ALB), so this works even before Hostinger DNS is switched. Retries
+      # cover install.sh still running on a freshly launched server.
+      - name: Verify Deployed Endpoint (Smoke Test)
+        run: |
+          DOMAIN="$TF_VAR_domain_name"
+          ENDPOINT=$(terraform output -raw app_endpoint)
+          IP=$(getent ahostsv4 "$ENDPOINT" | awk 'NR==1 {print $1}')
+          echo "Testing $DOMAIN via $ENDPOINT ($IP)..."
+
+          STATUS=000
+          for attempt in $(seq 1 40); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L --max-time 15 \
+              --resolve "$DOMAIN:80:$IP" --resolve "$DOMAIN:443:$IP" \
+              "http://$DOMAIN/") || STATUS=000
+            [ "$STATUS" = "200" ] && break
+            echo "Attempt $attempt/40: HTTP $STATUS, retrying in 10s..."
+            sleep 10
+          done
+
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Deployed endpoint $ENDPOINT did not return HTTP 200 for $DOMAIN (last: $STATUS)"
             exit 1
           fi
-          echo "🎉 Production Health Gate Passed: Site is 100% operational (HTTP 200)!"
+          echo "Deployed endpoint healthy: HTTP 200"
 
-      # 10. Destroy Infrastructure on Demand (Only on Explicit Dispatch Destroy)
+      # Informational: is public DNS pointing at the right place yet?
+      - name: Check Public DNS & HTTPS
+        run: |
+          DOMAIN="$TF_VAR_domain_name"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L --max-time 15 "https://$DOMAIN/") || STATUS=000
+          if [ "$STATUS" = "200" ]; then
+            echo "https://$DOMAIN is live (HTTP 200)"
+          else
+            echo "::warning::https://$DOMAIN returned $STATUS. If you just switched architecture_mode, update Hostinger DNS: $(terraform output -raw dns_instructions)"
+          fi
+          {
+            echo "### Deployment"
+            echo "- Mode: \`$(terraform output -raw architecture_mode)\`"
+            echo "- Endpoint: \`$(terraform output -raw app_endpoint)\`"
+            echo "- Hostinger DNS should be: \`$(terraform output -raw dns_instructions)\`"
+            echo "- Public HTTPS check: HTTP $STATUS"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ----------------------------------------------------------------------------
+  # 3. Destroy (manual only) - gated by the production environment
+  # ----------------------------------------------------------------------------
+  destroy:
+    name: "Destroy Infrastructure"
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Force Unlock Stale Lock
+        if: github.event.inputs.lock_id != ''
+        run: terraform force-unlock -force "${{ github.event.inputs.lock_id }}"
+
       - name: Terraform Destroy
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
-        run: terraform destroy -auto-approve
+        run: terraform destroy -auto-approve -no-color

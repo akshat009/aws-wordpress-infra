@@ -1,22 +1,45 @@
 # ==============================================================================
 # File: variables.tf
-# Tier: Step 1 - Parameterized Input Variables
-# Description: Defines reusable, typed variables for cloud regions, naming,
-#              environments, and CIDR subnet address blocks.
+# Tier: Input Variables
+# Description: Every tunable setting for the stack. The most important one is
+#              architecture_mode at the top: change it to move between the
+#              $0 standalone setup and the enterprise (RDS + ALB) setup.
 # ==============================================================================
+
+# ==============================================================================
+# ARCHITECTURE SWITCH (change this one value, then push)
+# ==============================================================================
+# "standalone" : 1 EC2 + local MySQL + Elastic IP + Let's Encrypt     (~$0 on Free Tier)
+# "migrating"  : standalone keeps serving, PLUS RDS + ACM certificate are created.
+#                Use this stage to copy the database and validate the certificate.
+# "enterprise" : ALB + Auto Scaling Group + RDS + ACM (TLS 1.3); standalone removed.
+#
+# Upgrade:   standalone -> migrating -> enterprise
+# Downgrade: enterprise -> migrating -> standalone
+# Step-by-step runbook: README.md -> "Switching architecture modes".
+variable "architecture_mode" {
+  description = "Which architecture to build: standalone, migrating or enterprise"
+  type        = string
+  default     = "standalone"
+
+  validation {
+    condition     = contains(["standalone", "migrating", "enterprise"], var.architecture_mode)
+    error_message = "architecture_mode must be one of: standalone, migrating, enterprise."
+  }
+}
 
 # ------------------------------------------------------------------------------
 # General Project & Environment Variables
 # ------------------------------------------------------------------------------
 
 variable "aws_region" {
-  description = "The target AWS geographic region where all resources are provisioned"
+  description = "AWS region where all resources are provisioned"
   type        = string
   default     = "ap-south-1" # Asia Pacific (Mumbai)
 }
 
 variable "project_name" {
-  description = "Standard naming prefix applied to all resources, tags, and security groups"
+  description = "Naming prefix applied to all resources, tags and security groups"
   type        = string
   default     = "wp-lab"
 }
@@ -28,108 +51,147 @@ variable "environment" {
 }
 
 variable "domain_name" {
-  description = "Custom domain or subdomain for WordPress (e.g. lab.asaxenadev.com)"
+  description = "Custom domain or subdomain for WordPress (CI sets this from the DOMAIN_NAME repo variable)"
   type        = string
   default     = "lab.asaxenadev.com"
 }
 
 # ------------------------------------------------------------------------------
-# Networking Tier Variables (Step 1 - VPC & Subnets)
+# Networking (VPC & Subnets)
 # ------------------------------------------------------------------------------
 
 variable "vpc_cidr" {
-  description = "Master Classless Inter-Domain Routing (CIDR) block for the isolated VPC. /16 yields 65,536 total private IP addresses."
+  description = "CIDR block for the VPC (/16 = 65,536 private IPs)"
   type        = string
   default     = "10.0.0.0/16"
 }
 
-# Public Subnets (For Application Load Balancer & Public Ingress)
-# AWS ALBs require a minimum of 2 public subnets in 2 distinct Availability Zones.
+# Public subnets: ALB and web servers. ALBs require 2 subnets in 2 AZs.
 variable "public_subnet_1_cidr" {
-  description = "CIDR block for Public Subnet 1 residing in Availability Zone ap-south-1a (/24 yields 251 usable host IPs)."
+  description = "CIDR block for Public Subnet 1 (ap-south-1a)"
   type        = string
   default     = "10.0.1.0/24"
 }
 
 variable "public_subnet_2_cidr" {
-  description = "CIDR block for Public Subnet 2 residing in Availability Zone ap-south-1b (/24 yields 251 usable host IPs)."
+  description = "CIDR block for Public Subnet 2 (ap-south-1b)"
   type        = string
   default     = "10.0.2.0/24"
 }
 
-# Private Subnets (For Amazon RDS MySQL Database & ElastiCache Redis Cluster)
-# Zero internet routing. Dedicated exclusively to backend stateful data stores.
+# Private subnets: RDS and Redis. No internet route at all.
 variable "private_subnet_1_cidr" {
-  description = "CIDR block for Private Subnet 1 (RDS Primary & Redis Node A) in Availability Zone ap-south-1a."
+  description = "CIDR block for Private Subnet 1 (ap-south-1a)"
   type        = string
   default     = "10.0.11.0/24"
 }
 
 variable "private_subnet_2_cidr" {
-  description = "CIDR block for Private Subnet 2 (RDS Standby & Redis Node B) in Availability Zone ap-south-1b."
+  description = "CIDR block for Private Subnet 2 (ap-south-1b)"
   type        = string
   default     = "10.0.12.0/24"
 }
 
 # ------------------------------------------------------------------------------
-# Database Tier Variables (Step 4 - Amazon RDS MySQL)
+# Database
 # ------------------------------------------------------------------------------
+# The password is NOT a variable any more: Terraform generates it and stores it
+# in SSM Parameter Store as a SecureString (see secrets.tf).
 
 variable "db_name" {
-  description = "Initial database name automatically created when the RDS MySQL instance boots"
+  description = "WordPress database name"
   type        = string
   default     = "wordpress"
 }
 
 variable "db_username" {
-  description = "Master administrative username for the RDS MySQL database"
+  description = "WordPress database user (also the RDS master user)"
   type        = string
   default     = "wpuser"
 }
 
-variable "db_password" {
-  description = "Master administrative password for the RDS MySQL database (Sensitive)"
-  type        = string
-  sensitive   = true
-  default     = "SecureLabPass2026!"
-}
-
 variable "db_instance_class" {
-  description = "Compute and memory capacity for the database instance (db.t3.micro is AWS Free Tier eligible)"
+  description = "RDS instance size (db.t3.micro is Free Tier eligible)"
   type        = string
   default     = "db.t3.micro"
 }
 
 variable "db_allocated_storage" {
-  description = "Initial allocated storage in gigabytes (AWS Free Tier includes up to 20 GB gp3/gp2)"
+  description = "Initial RDS storage in GB (Free Tier includes 20 GB)"
   type        = number
   default     = 20
 }
 
+variable "rds_multi_az" {
+  description = "Run a standby RDS replica in a second AZ (production HA; roughly doubles RDS cost)"
+  type        = bool
+  default     = false
+}
+
+variable "rds_backup_retention_days" {
+  description = "Days of automated RDS backups (point-in-time recovery window)"
+  type        = number
+  default     = 7
+}
+
+variable "rds_deletion_protection" {
+  description = "Block RDS deletion. Set true in production; must be false before downgrading to standalone."
+  type        = bool
+  default     = false
+}
+
 # ------------------------------------------------------------------------------
-# Compute & Auto Scaling Tier Variables (Step 6 - ALB & EC2 Fleet)
+# Compute & Auto Scaling
 # ------------------------------------------------------------------------------
 
 variable "instance_type" {
-  description = "EC2 hardware instance size for WordPress web nodes (t3.micro is AWS Free Tier eligible)"
+  description = "EC2 size for WordPress servers (t3.micro is Free Tier eligible)"
   type        = string
   default     = "t3.micro"
 }
 
 variable "asg_min_size" {
-  description = "Minimum number of healthy EC2 instances maintained in the Auto Scaling Group"
+  description = "Minimum number of servers in the Auto Scaling Group"
   type        = number
   default     = 1
 }
 
 variable "asg_desired_capacity" {
-  description = "Initial target number of EC2 instances running behind the Application Load Balancer"
+  description = "Starting number of servers in the Auto Scaling Group"
   type        = number
   default     = 2
 }
 
 variable "asg_max_size" {
-  description = "Maximum burst limit for EC2 instances during high traffic spikes"
+  description = "Maximum number of servers during traffic spikes"
   type        = number
   default     = 4
+}
+
+variable "asg_cpu_target" {
+  description = "Average CPU % the Auto Scaling Group tries to hold (target tracking)"
+  type        = number
+  default     = 60
+}
+
+# ------------------------------------------------------------------------------
+# Monitoring, Cost & Backups
+# ------------------------------------------------------------------------------
+
+variable "alert_email" {
+  description = "Email for alarms and budget alerts (CI sets this from the ALERT_EMAIL repo variable). Empty = no email subscription."
+  type        = string
+  default     = ""
+}
+
+variable "monthly_budget_usd" {
+  description = "Monthly AWS spend limit; alerts at 80% actual and 100% forecast"
+  type        = number
+  default     = 10
+}
+
+variable "enable_backups" {
+  description = "Daily AWS Backup snapshots of the standalone server and RDS, kept 7 days (small cost, usually under $1/month)"
+  type        = bool
+  default     = false
 }
