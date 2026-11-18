@@ -26,23 +26,10 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
           audience: sts.amazonaws.com
 
-      - name: Budgets (name, amount, notifications)
+      - name: Budgets (names and amounts)
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          aws budgets describe-budgets --account-id "$ACCOUNT_ID" \
-            --query 'Budgets[].{Name:BudgetName,Amount:BudgetLimit.Amount,Unit:BudgetLimit.Unit,Type:BudgetType,Time:TimeUnit}' --output table
-          for name in $(aws budgets describe-budgets --account-id "$ACCOUNT_ID" --query 'Budgets[].BudgetName' --output text | tr '\t' '\n' | sed 's/ /%20/g'); do
-            n=$(echo "$name" | sed 's/%20/ /g')
-            echo "--- notifications for: [$n]"
-            aws budgets describe-notifications-for-budget --account-id "$ACCOUNT_ID" --budget-name "$n" --output json
-            for row in $(aws budgets describe-notifications-for-budget --account-id "$ACCOUNT_ID" --budget-name "$n" --query 'Notifications[].[NotificationType,ComparisonOperator,Threshold,ThresholdType]' --output text | tr '\t' ','); do
-              IFS=, read -r t c th tt <<< "$row"
-              echo "    subscribers of $t $c $th $tt:"
-              aws budgets describe-subscribers-for-notification --account-id "$ACCOUNT_ID" --budget-name "$n" \
-                --notification "NotificationType=$t,ComparisonOperator=$c,Threshold=$th,ThresholdType=$tt" \
-                --query 'Subscribers[].SubscriptionType' --output text
-            done
-          done
+          aws budgets describe-budgets --account-id "$ACCOUNT_ID"             --query 'Budgets[].{Name:BudgetName,Amount:BudgetLimit.Amount}' --output table
 
       - name: SSM parameters under /<project>/ (names only, never values)
         run: |

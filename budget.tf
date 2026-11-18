@@ -53,7 +53,7 @@ moved {
 resource "aws_budgets_budget" "zero_spend" {
   count = var.enable_budget ? 1 : 0
 
-  name         = "My Zero Spend Budget" # the console name; renaming would recreate it
+  name         = "My Zero-Spend Budget" # the console name; renaming would recreate it
   budget_type  = "COST"
   limit_amount = "1.0"
   limit_unit   = "USD"
@@ -76,5 +76,5 @@ resource "aws_budgets_budget" "zero_spend" {
 import {
   for_each = var.enable_budget ? toset(["zero_spend"]) : toset([])
   to       = aws_budgets_budget.zero_spend[0]
-  id       = "${local.account_id}:My Zero Spend Budget"
+  id       = "${local.account_id}:My Zero-Spend Budget"
 }

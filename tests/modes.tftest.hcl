@@ -57,7 +57,7 @@ override_resource {
 override_resource {
   target = aws_budgets_budget.zero_spend
   values = {
-    id = "123456789012:My Zero Spend Budget"
+    id = "123456789012:My Zero-Spend Budget"
   }
 }
 
