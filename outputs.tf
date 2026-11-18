@@ -23,12 +23,12 @@ output "wordpress_url" {
 # ALB DNS name in enterprise mode. Used by the pipeline's smoke test.
 output "app_endpoint" {
   description = "Elastic IP (standalone/migrating) or ALB DNS name (enterprise)"
-  value       = local.run_fleet ? one(aws_lb.main[*].dns_name) : one(aws_eip.web[*].public_ip)
+  value       = local.run_alb ? one(aws_lb.main[*].dns_name) : one(aws_eip.web[*].public_ip)
 }
 
 output "dns_instructions" {
   description = "What the Hostinger DNS record for the site should be right now"
-  value = local.run_fleet ? (
+  value = local.run_alb ? (
     "CNAME  ${split(".", var.domain_name)[0]}  ->  ${one(aws_lb.main[*].dns_name)}"
     ) : (
     "A  ${split(".", var.domain_name)[0]}  ->  ${one(aws_eip.web[*].public_ip)}"

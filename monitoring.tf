@@ -84,7 +84,7 @@ resource "aws_sns_topic_subscription" "email" {
 # Hardware/host failure: AWS automatically recovers the instance onto healthy
 # hardware (same instance ID, Elastic IP and disk) and emails you.
 resource "aws_cloudwatch_metric_alarm" "standalone_system_check" {
-  count = local.run_standalone ? 1 : 0
+  count = local.run_standalone && var.enable_alarms ? 1 : 0
 
   alarm_name          = "${var.project_name}-standalone-system-check-failed"
   alarm_description   = "AWS host problem on the standalone server; auto-recovery triggered"
@@ -105,7 +105,7 @@ resource "aws_cloudwatch_metric_alarm" "standalone_system_check" {
 
 # OS-level failure (kernel panic, out of memory, broken networking): reboot.
 resource "aws_cloudwatch_metric_alarm" "standalone_instance_check" {
-  count = local.run_standalone ? 1 : 0
+  count = local.run_standalone && var.enable_alarms ? 1 : 0
 
   alarm_name          = "${var.project_name}-standalone-instance-check-failed"
   alarm_description   = "Standalone server OS is unresponsive; automatic reboot triggered"
@@ -125,7 +125,7 @@ resource "aws_cloudwatch_metric_alarm" "standalone_instance_check" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "standalone_cpu_high" {
-  count = local.run_standalone ? 1 : 0
+  count = local.run_standalone && var.enable_alarms ? 1 : 0
 
   alarm_name          = "${var.project_name}-standalone-cpu-high"
   alarm_description   = "Standalone server CPU above 80% for 15 minutes (t3 burst credits draining)"
@@ -145,7 +145,7 @@ resource "aws_cloudwatch_metric_alarm" "standalone_cpu_high" {
 # 3. Load balancer alarms (enterprise)
 # ------------------------------------------------------------------------------
 resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_hosts" {
-  count = local.run_fleet ? 1 : 0
+  count = local.run_alb && var.enable_alarms ? 1 : 0
 
   alarm_name          = "${var.project_name}-alb-unhealthy-hosts"
   alarm_description   = "One or more web servers are failing the /health.html check"
@@ -166,7 +166,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_hosts" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "alb_target_5xx" {
-  count = local.run_fleet ? 1 : 0
+  count = local.run_alb && var.enable_alarms ? 1 : 0
 
   alarm_name          = "${var.project_name}-alb-target-5xx"
   alarm_description   = "WordPress returned more than 10 server errors (5xx) in 5 minutes"
@@ -187,7 +187,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_target_5xx" {
 # 4. Database alarms (migrating + enterprise)
 # ------------------------------------------------------------------------------
 resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
-  count = local.run_rds ? 1 : 0
+  count = local.run_rds && var.enable_alarms ? 1 : 0
 
   alarm_name          = "${var.project_name}-rds-cpu-high"
   alarm_description   = "RDS CPU above 80% for 15 minutes"
@@ -204,7 +204,7 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "rds_storage_low" {
-  count = local.run_rds ? 1 : 0
+  count = local.run_rds && var.enable_alarms ? 1 : 0
 
   alarm_name          = "${var.project_name}-rds-free-storage-low"
   alarm_description   = "RDS free storage below 2 GB"

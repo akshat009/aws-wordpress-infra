@@ -151,3 +151,77 @@ run "invalid_mode_rejected" {
   variables { architecture_mode = "bogus" }
   expect_failures = [var.architecture_mode]
 }
+
+# ------------------------------------------------------------------------------
+# Individual feature switches (override the preset)
+# ------------------------------------------------------------------------------
+
+run "standalone_plus_rds" {
+  command = apply
+  variables {
+    architecture_mode = "standalone"
+    enable_rds        = true
+  }
+  assert {
+    condition     = length(aws_instance.web) == 1 && length(aws_db_instance.wordpress) == 1
+    error_message = "1 server + RDS expected"
+  }
+  assert {
+    condition     = length(aws_lb.main) == 0 && length(aws_acm_certificate.cert) == 0 && length(aws_autoscaling_group.web) == 0
+    error_message = "no load balancer, certificate or fleet expected"
+  }
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.rds_cpu_high) == 1 && output.app_endpoint == "16.4.164.224"
+    error_message = "RDS alarms on, traffic still to the Elastic IP"
+  }
+}
+
+run "standalone_plus_alb" {
+  command = apply
+  variables {
+    architecture_mode = "standalone"
+    enable_alb        = true
+  }
+  assert {
+    condition     = length(aws_instance.web) == 1 && length(aws_lb.main) == 1 && length(aws_lb_target_group_attachment.standalone) == 1
+    error_message = "load balancer in front of the single server expected"
+  }
+  assert {
+    condition     = length(aws_lb_listener.https) == 1 && length(aws_acm_certificate.cert) == 1 && length(aws_autoscaling_group.web) == 0 && length(aws_db_instance.wordpress) == 0
+    error_message = "HTTPS + certificate, but no fleet and no RDS expected"
+  }
+  assert {
+    condition     = length(aws_security_group.web.ingress) == 1 && alltrue([for r in aws_security_group.web.ingress : length(coalesce(r.cidr_blocks, [])) == 0 && r.from_port == 80])
+    error_message = "server must accept port 80 only from the load balancer"
+  }
+  assert {
+    condition     = output.app_endpoint == "wp-lab-alb-123.ap-south-1.elb.amazonaws.com"
+    error_message = "traffic should go to the load balancer"
+  }
+}
+
+run "fleet_without_rds_rejected" {
+  command = plan
+  variables {
+    architecture_mode = "enterprise"
+    enable_rds        = false
+  }
+  expect_failures = [terraform_data.feature_rules]
+}
+
+run "alarms_and_budget_off" {
+  command = apply
+  variables {
+    architecture_mode = "standalone"
+    enable_alarms     = false
+    enable_budget     = false
+  }
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.standalone_cpu_high) == 0 && length(aws_budgets_budget.monthly) == 0
+    error_message = "alarms and budget should be off"
+  }
+  assert {
+    condition     = length(aws_sns_topic.alerts.arn) > 0
+    error_message = "the alert topic always exists"
+  }
+}

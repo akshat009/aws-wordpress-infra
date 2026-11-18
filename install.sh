@@ -38,13 +38,17 @@ STANDALONE=false
 if [ "$DB_HOST" = "localhost" ] || [ "$DB_HOST" = "127.0.0.1" ]; then
     STANDALONE=true
 fi
+# A standalone server always gets local MySQL installed (INSTALL_LOCAL_DB=true from
+# Terraform), even when WordPress uses RDS, so rds-to-local migrations keep working.
+INSTALL_LOCAL_DB="${INSTALL_LOCAL_DB:-$STANDALONE}"
+
 log "Mode: $([ "$STANDALONE" = true ] && echo 'standalone (local MySQL)' || echo "fleet (RDS at $DB_HOST)")"
 
 # 3. Packages (MySQL server only where the database lives on this machine)
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 PACKAGES="nginx mysql-client php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-zip php-intl unzip curl ed"
-if [ "$STANDALONE" = true ]; then
+if [ "$INSTALL_LOCAL_DB" = true ]; then
     PACKAGES="$PACKAGES mysql-server"
 fi
 # shellcheck disable=SC2086
@@ -75,7 +79,7 @@ if [ -z "$DB_PASS" ]; then
 fi
 
 # 6. Standalone only: create the local database and user
-if [ "$STANDALONE" = true ]; then
+if [ "$INSTALL_LOCAL_DB" = true ]; then
     log "Configuring local MySQL server..."
     systemctl enable --now mysql
     mysql -e "CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"

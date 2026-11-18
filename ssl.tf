@@ -35,7 +35,7 @@ resource "aws_acm_certificate" "cert" {
 # 2. Wait for DNS validation (only in "enterprise", when the ALB needs it)
 # ------------------------------------------------------------------------------
 resource "aws_acm_certificate_validation" "cert" {
-  count = local.run_fleet ? 1 : 0
+  count = local.run_alb ? 1 : 0
 
   certificate_arn = aws_acm_certificate.cert[0].arn
 
@@ -48,7 +48,7 @@ resource "aws_acm_certificate_validation" "cert" {
 # 3. ALB HTTPS:443 listener with a TLS 1.3 policy
 # ------------------------------------------------------------------------------
 resource "aws_lb_listener" "https" {
-  count = local.run_fleet ? 1 : 0
+  count = local.run_alb ? 1 : 0
 
   load_balancer_arn = aws_lb.main[0].arn
   port              = 443

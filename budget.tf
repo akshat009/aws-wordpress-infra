@@ -8,6 +8,8 @@
 # ==============================================================================
 
 resource "aws_budgets_budget" "monthly" {
+  count = var.enable_budget ? 1 : 0
+
   name         = "${var.project_name}-monthly-cost"
   budget_type  = "COST"
   limit_amount = tostring(var.monthly_budget_usd)
@@ -33,4 +35,10 @@ resource "aws_budgets_budget" "monthly" {
   }
 
   depends_on = [aws_sns_topic_policy.alerts]
+}
+
+# The budget had no count before; keep the existing budget (same object, new address)
+moved {
+  from = aws_budgets_budget.monthly
+  to   = aws_budgets_budget.monthly[0]
 }

@@ -52,12 +52,12 @@ resource "aws_security_group" "alb" {
 # ------------------------------------------------------------------------------
 # 2. Web Tier (EC2) Security Group
 # ------------------------------------------------------------------------------
-# Inbound rules follow architecture_mode automatically:
-#   standalone / migrating : 80 + 443 from the internet (no ALB in front)
-#   enterprise             : 80 ONLY from the ALB security group
+# Inbound rules follow the load balancer switch automatically:
+#   no load balancer : 80 + 443 from the internet
+#   load balancer on : 80 ONLY from the ALB security group (single server or fleet)
 # Port 22 (SSH) is closed in every mode; access is through SSM Session Manager.
 locals {
-  web_public_ingress = local.run_standalone ? {
+  web_public_ingress = local.run_standalone && !local.run_alb ? {
     80  = "Allow HTTP directly from global internet (Non-ALB standalone mode)"
     443 = "Allow HTTPS directly from global internet (Non-ALB standalone mode)"
   } : {}
@@ -82,7 +82,7 @@ resource "aws_security_group" "web" {
 
   # Enterprise: port 80 only from the ALB (security group chaining)
   dynamic "ingress" {
-    for_each = local.run_fleet ? [80] : []
+    for_each = local.run_alb ? [80] : []
     content {
       description     = "Allow HTTP strictly from Application Load Balancer"
       from_port       = ingress.value

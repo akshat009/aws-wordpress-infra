@@ -64,7 +64,8 @@ resource "aws_instance" "web" {
   user_data = base64encode(<<-EOF
 #!/bin/bash
 ${local.boot_env}
-export DB_HOST="localhost"
+export DB_HOST="${local.run_rds ? one(aws_db_instance.wordpress[*].address) : "localhost"}"
+export INSTALL_LOCAL_DB="true"
 
 ${file("${path.module}/install.sh")}
 EOF
@@ -127,7 +128,7 @@ moved {
 # ALB Target Group (health checked on /health.html)
 # ------------------------------------------------------------------------------
 resource "aws_lb_target_group" "web" {
-  count = local.run_fleet ? 1 : 0
+  count = local.run_alb ? 1 : 0
 
   name        = "${var.project_name}-web-tg"
   port        = 80
@@ -156,7 +157,7 @@ resource "aws_lb_target_group" "web" {
 # Application Load Balancer (internet-facing, 2 AZs)
 # ------------------------------------------------------------------------------
 resource "aws_lb" "main" {
-  count = local.run_fleet ? 1 : 0
+  count = local.run_alb ? 1 : 0
 
   name               = "${var.project_name}-alb"
   internal           = false
@@ -176,7 +177,7 @@ resource "aws_lb" "main" {
 # ALB HTTP:80 Listener (301 redirect to HTTPS:443)
 # ------------------------------------------------------------------------------
 resource "aws_lb_listener" "http" {
-  count = local.run_fleet ? 1 : 0
+  count = local.run_alb ? 1 : 0
 
   load_balancer_arn = aws_lb.main[0].arn
   port              = 80
@@ -233,7 +234,7 @@ resource "aws_launch_template" "web" {
   user_data = base64encode(<<-EOF
 #!/bin/bash
 ${local.boot_env}
-export DB_HOST="${aws_db_instance.wordpress[0].address}"
+export DB_HOST="${try(aws_db_instance.wordpress[0].address, "")}"
 
 ${file("${path.module}/install.sh")}
 EOF
@@ -259,7 +260,7 @@ resource "aws_autoscaling_group" "web" {
 
   name_prefix               = "${var.project_name}-asg-"
   vpc_zone_identifier       = [aws_subnet.public_1.id, aws_subnet.public_2.id]
-  target_group_arns         = [aws_lb_target_group.web[0].arn]
+  target_group_arns         = aws_lb_target_group.web[*].arn
   health_check_type         = "ELB"
   health_check_grace_period = 300
 
@@ -310,4 +311,15 @@ resource "aws_autoscaling_policy" "cpu" {
     }
     target_value = var.asg_cpu_target
   }
+}
+
+# ------------------------------------------------------------------------------
+# Load balancer in front of the SINGLE server (enable_alb without the fleet)
+# ------------------------------------------------------------------------------
+resource "aws_lb_target_group_attachment" "standalone" {
+  count = local.run_alb && local.run_standalone ? 1 : 0
+
+  target_group_arn = aws_lb_target_group.web[0].arn
+  target_id        = aws_instance.web[0].id
+  port             = 80
 }
