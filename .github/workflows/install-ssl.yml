@@ -12,9 +12,9 @@ on:
         required: true
         default: "lab.asaxenadev.com"
       email:
-        description: "Admin Email for SSL registration (Standalone Certbot)"
-        required: true
-        default: "saxena.akshat.akshat@gmail.com"
+        description: "Admin email for Let's Encrypt (leave empty to use the ALERT_EMAIL repo secret)"
+        required: false
+        default: ""
 
 permissions:
   id-token: write # Required for AWS IAM OIDC
@@ -136,7 +136,12 @@ jobs:
         run: |
           INSTANCE_ID="${{ steps.get-instance.outputs.instance_id }}"
           DOMAIN="${{ github.event.inputs.domain }}"
-          EMAIL="${{ github.event.inputs.email }}"
+          # Email comes from the form, or else the ALERT_EMAIL repo secret (never hard-coded, masked in logs)
+          EMAIL="${{ github.event.inputs.email || secrets.ALERT_EMAIL }}"
+          if [ -z "$EMAIL" ]; then
+            echo "::error::No email: enter one in the form or set the ALERT_EMAIL repository secret."
+            exit 1
+          fi
 
           echo "Dispatching Certbot SSL command to instance $INSTANCE_ID for domain $DOMAIN..."
 

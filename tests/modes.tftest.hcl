@@ -53,6 +53,12 @@ override_resource {
   }
 }
 
+# Pin inputs that CI also passes as TF_VAR_* environment variables, so the tests
+# don't depend on repository settings (test-file values take precedence).
+variables {
+  alert_email = ""
+}
+
 run "standalone" {
   command = apply
   variables { architecture_mode = "standalone" }
