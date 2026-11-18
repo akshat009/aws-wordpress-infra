@@ -1,0 +1,58 @@
+name: "TEMP: read-only inventory (remove before merge)"
+
+# One-off, read-only: lists console-made resources so the import in PR #24 uses
+# the exact names. Prints names only (no secret values). Deleted before merge.
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/tmp-inventory.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Budgets (name, amount, notifications)
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          aws budgets describe-budgets --account-id "$ACCOUNT_ID" \
+            --query 'Budgets[].{Name:BudgetName,Amount:BudgetLimit.Amount,Unit:BudgetLimit.Unit,Type:BudgetType,Time:TimeUnit}' --output table
+          for name in $(aws budgets describe-budgets --account-id "$ACCOUNT_ID" --query 'Budgets[].BudgetName' --output text | tr '\t' '\n' | sed 's/ /%20/g'); do
+            n=$(echo "$name" | sed 's/%20/ /g')
+            echo "--- notifications for: [$n]"
+            aws budgets describe-notifications-for-budget --account-id "$ACCOUNT_ID" --budget-name "$n" --output json
+            for row in $(aws budgets describe-notifications-for-budget --account-id "$ACCOUNT_ID" --budget-name "$n" --query 'Notifications[].[NotificationType,ComparisonOperator,Threshold,ThresholdType]' --output text | tr '\t' ','); do
+              IFS=, read -r t c th tt <<< "$row"
+              echo "    subscribers of $t $c $th $tt:"
+              aws budgets describe-subscribers-for-notification --account-id "$ACCOUNT_ID" --budget-name "$n" \
+                --notification "NotificationType=$t,ComparisonOperator=$c,Threshold=$th,ThresholdType=$tt" \
+                --query 'Subscribers[].SubscriptionType' --output text
+            done
+          done
+
+      - name: SSM parameters under /<project>/ (names only, never values)
+        run: |
+          aws ssm describe-parameters \
+            --parameter-filters "Key=Name,Option=BeginsWith,Values=/${PROJECT_NAME}/" \
+            --query 'Parameters[].{Name:Name,Type:Type,LastModified:LastModifiedDate}' --output table
+
+      - name: CloudWatch alarms (name, metric, dimensions, state)
+        run: |
+          aws cloudwatch describe-alarms \
+            --query 'MetricAlarms[].{Name:AlarmName,Metric:MetricName,Namespace:Namespace,State:StateValue,Dims:join(`,`, Dimensions[].Value)}' --output table
+          echo "--- running/stopped instances (id, Name tag, state)"
+          aws ec2 describe-instances --query 'Reservations[].Instances[].{Id:InstanceId,Name:Tags[?Key==`Name`]|[0].Value,State:State.Name}' --output table
