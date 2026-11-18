@@ -1,20 +1,19 @@
 # ==============================================================================
 # File: security-groups.tf
-# Tier: Step 2 - Chained Security Groups & Zero-Trust Perimeter
-# Description: Defines the hypervisor firewalls using Security Group Chaining
-#              (source SG referencing) instead of fragile IP CIDRs.
+# Tier: Chained Security Groups & Zero-Trust Perimeter
+# Description: Firewalls use Security Group Chaining (a rule's source is another
+#              security group, not an IP range). All 4 groups exist in every
+#              mode: they cost nothing, and keeping them avoids
+#              DependencyViolation errors when switching modes.
+#
+# WARNING: never edit a security group's `name` or `description` - AWS cannot
+# change them in place, so Terraform would delete and recreate the group.
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
 # 1. Application Load Balancer (ALB) Security Group
 # ------------------------------------------------------------------------------
-# ==============================================================================
-# 🏢 PROFESSIONAL PRODUCTION SETUP:
-# In an enterprise/production setup, the ALB Security Group is the ONLY component
-# in the entire cloud infrastructure exposed to 0.0.0.0/0 on Port 80 and 443.
-# All backend web servers sit shielded behind the ALB and never accept direct traffic.
-# (Kept in code to prevent DependencyViolation during standalone migration; cost = $0).
-# ==============================================================================
+# The only thing in enterprise mode that accepts traffic from the internet.
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
   description = "Public ingress firewall for Application Load Balancer (HTTP/HTTPS)"
@@ -51,66 +50,49 @@ resource "aws_security_group" "alb" {
 }
 
 # ------------------------------------------------------------------------------
-# 2. Web Tier (EC2 Compute) Security Group
+# 2. Web Tier (EC2) Security Group
 # ------------------------------------------------------------------------------
-# Role: Protects the WordPress EC2 instances.
-#
-# ==============================================================================
-# 🏢 PROFESSIONAL PRODUCTION SETUP:
-# In an enterprise setup, Web servers NEVER accept direct traffic from 0.0.0.0/0!
-# Inbound Port 80 is strictly locked to traffic forwarded by the ALB Security Group:
-#   ingress {
-#     description     = "Allow HTTP strictly from ALB (no direct internet ingress)"
-#     from_port       = 80
-#     to_port         = 80
-#     protocol        = "tcp"
-#     security_groups = [aws_security_group.alb.id] # Security Group Chaining!
-#   }
-# Port 22 (SSH) is 100% ELIMINATED! Management is done via AWS SSM Session Manager.
-#
-# 💡 STANDALONE / BUDGET MODE:
-# Since ALB is removed, the standalone web server must listen directly to public
-# internet traffic (0.0.0.0/0) on Port 80 and Port 443. Port 22 SSH still remains closed.
-# ==============================================================================
+# Inbound rules follow architecture_mode automatically:
+#   standalone / migrating : 80 + 443 from the internet (no ALB in front)
+#   enterprise             : 80 ONLY from the ALB security group
+# Port 22 (SSH) is closed in every mode; access is through SSM Session Manager.
+locals {
+  web_public_ingress = local.run_standalone ? {
+    80  = "Allow HTTP directly from global internet (Non-ALB standalone mode)"
+    443 = "Allow HTTPS directly from global internet (Non-ALB standalone mode)"
+  } : {}
+}
+
 resource "aws_security_group" "web" {
   name        = "${var.project_name}-web-sg"
   description = "Firewall for WordPress EC2 instances - chained strictly to ALB SG"
   vpc_id      = aws_vpc.main.id
 
-  # ----------------------------------------------------------------------------
-  # 🏢 PROFESSIONAL PRODUCTION INGRESS (COMMENTED OUT IN STANDALONE MODE):
-  # ----------------------------------------------------------------------------
-  # ingress {
-  #   description     = "Allow HTTP strictly from Application Load Balancer"
-  #   from_port       = 80
-  #   to_port         = 80
-  #   protocol        = "tcp"
-  #   security_groups = [aws_security_group.alb.id]
-  # }
-
-  # ----------------------------------------------------------------------------
-  # 💡 STANDALONE MODE INGRESS (Direct Public Ingress for Port 80 & 443):
-  # ----------------------------------------------------------------------------
-  ingress {
-    description = "Allow HTTP directly from global internet (Non-ALB standalone mode)"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  # Standalone: direct public ingress on 80/443
+  dynamic "ingress" {
+    for_each = local.web_public_ingress
+    content {
+      description = ingress.value
+      from_port   = ingress.key
+      to_port     = ingress.key
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
   }
 
-  ingress {
-    description = "Allow HTTPS directly from global internet (Non-ALB standalone mode)"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  # Enterprise: port 80 only from the ALB (security group chaining)
+  dynamic "ingress" {
+    for_each = local.run_fleet ? [80] : []
+    content {
+      description     = "Allow HTTP strictly from Application Load Balancer"
+      from_port       = ingress.value
+      to_port         = ingress.value
+      protocol        = "tcp"
+      security_groups = [aws_security_group.alb.id]
+    }
   }
 
-  # Outbound Rule: Required for EC2 to reach external AWS APIs and package repositories:
-  # - AWS SSM Session Manager endpoints (outbound 443)
-  # - Amazon S3 media upload API (outbound 443)
-  # - Ubuntu APT repository updates (outbound 80/443)
+  # Outbound: SSM endpoints, S3, RDS, Ubuntu package mirrors, Let's Encrypt
   egress {
     description = "Allow all outbound traffic for SSM agent, S3 uploads, and OS updates"
     from_port   = 0
@@ -126,14 +108,9 @@ resource "aws_security_group" "web" {
 }
 
 # ------------------------------------------------------------------------------
-# 3. Database Tier (Amazon RDS MySQL 8.0) Security Group
+# 3. Database Tier (Amazon RDS MySQL) Security Group
 # ------------------------------------------------------------------------------
-# ==============================================================================
-# 🏢 PROFESSIONAL PRODUCTION SETUP:
-# In an enterprise setup, Amazon RDS MySQL has its own dedicated firewall placed
-# in private subnets, chained strictly to accept Port 3306 ONLY from web-sg.
-# (Kept in code to prevent DependencyViolation during standalone migration; cost = $0).
-# ==============================================================================
+# MySQL 3306 only from web servers. Used by RDS in migrating/enterprise modes.
 resource "aws_security_group" "db" {
   name        = "${var.project_name}-db-sg"
   description = "Firewall for Amazon RDS MySQL - chained strictly to EC2 Web SG"
@@ -154,8 +131,9 @@ resource "aws_security_group" "db" {
 }
 
 # ------------------------------------------------------------------------------
-# 4. Cache Tier (Amazon ElastiCache Redis 7.x) Security Group
+# 4. Cache Tier (Amazon ElastiCache Redis) Security Group
 # ------------------------------------------------------------------------------
+# Reserved for a future ElastiCache Redis object cache (not provisioned yet).
 resource "aws_security_group" "redis" {
   name        = "${var.project_name}-redis-sg"
   description = "Firewall for ElastiCache Redis - chained strictly to EC2 Web SG"

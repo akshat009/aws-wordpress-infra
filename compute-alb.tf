@@ -1,17 +1,18 @@
 # ==============================================================================
 # File: compute-alb.tf
-# Tier: Step 6 - Compute Tier (Standalone EC2 vs Application Load Balancer & ASG)
-# Description: Demonstrates the contrast between an Enterprise Multi-AZ ALB + ASG
-#              architecture and a Standalone Single-Server EC2 architecture.
+# Tier: Compute (Standalone EC2  <->  Application Load Balancer + Auto Scaling)
+# Description: Both architectures live here. architecture_mode (variables.tf)
+#              decides which one exists, through the flags in locals.tf:
+#                - local.run_standalone : single EC2 + Elastic IP
+#                - local.run_fleet      : ALB + target group + launch template + ASG
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# 1. Canonical Ubuntu 24.04 LTS Dynamic AMI Lookup
+# 1. Canonical Ubuntu 24.04 LTS AMI lookup (no hard-coded AMI IDs)
 # ------------------------------------------------------------------------------
-# Eliminates hardcoded AMI IDs (which vary by region and become deprecated monthly).
 data "aws_ami" "ubuntu" {
   most_recent = true
-  owners      = ["099720109477"] # Canonical official owner ID
+  owners      = ["099720109477"] # Canonical
 
   filter {
     name   = "name"
@@ -25,12 +26,28 @@ data "aws_ami" "ubuntu" {
 }
 
 # ------------------------------------------------------------------------------
-# 2. Standalone Single-Server Compute (Non-ALB, Non-ASG Setup)
+# 2. Boot configuration shared by both modes
 # ------------------------------------------------------------------------------
-# 💡 STANDALONE / BUDGET MODE:
-# Single EC2 instance deployed in public subnet with an Elastic IP (EIP).
-# Connects to local MySQL on localhost (RDS commented out).
+# No secrets here: install.sh reads the DB password from SSM Parameter Store.
+locals {
+  boot_env = <<-EOT
+    export DB_NAME="${var.db_name}"
+    export DB_USER="${var.db_username}"
+    export DB_PASSWORD_PARAM="${local.db_password_param}"
+    export AWS_REGION="${var.aws_region}"
+    export DOMAIN_NAME="${var.domain_name}"
+    export ARTIFACT_BUCKET="${aws_s3_bucket.artifacts.id}"
+  EOT
+}
+
+# ==============================================================================
+# STANDALONE MODE (architecture_mode = "standalone" or "migrating")
+# ==============================================================================
+# One EC2 in a public subnet with an Elastic IP, running Nginx + PHP + local
+# MySQL. Cheapest possible setup (~$0 on Free Tier) but a single point of failure.
 resource "aws_instance" "web" {
+  count = local.run_standalone ? 1 : 0
+
   ami                         = data.aws_ami.ubuntu.id
   instance_type               = var.instance_type
   subnet_id                   = aws_subnet.public_1.id
@@ -38,33 +55,44 @@ resource "aws_instance" "web" {
   iam_instance_profile        = aws_iam_instance_profile.ec2.name
   user_data_replace_on_change = false
 
-  lifecycle {
-    prevent_destroy = true
-    ignore_changes  = [user_data]
+  # IMDSv2 only: blocks SSRF-style credential theft through the metadata service.
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
   }
 
   user_data = base64encode(<<-EOF
 #!/bin/bash
-export DB_NAME="${var.db_name}"
-export DB_USER="${var.db_username}"
-export DB_PASS="${var.db_password}"
-# 🏢 PROFESSIONAL PRODUCTION: export DB_HOST="${var.db_name}.rds.amazonaws.com"
-# 💡 STANDALONE MODE: Local MySQL on same EC2
+${local.boot_env}
 export DB_HOST="localhost"
-export DOMAIN_NAME="${var.domain_name}"
 
 ${file("${path.module}/install.sh")}
 EOF
   )
 
+  # This server holds the local database, so it must never be replaced by
+  # accident. A new Ubuntu AMI release or an edit to install.sh would otherwise
+  # force a replacement. It is only removed on purpose, by switching
+  # architecture_mode to "enterprise" (after the data has been moved to RDS).
+  #
+  # Note: prevent_destroy was removed because it cannot be made conditional and
+  # would block the planned mode switch. The safety net is now: ignore_changes
+  # below + plan review/approval in the "production" environment of terraform.yml.
+  lifecycle {
+    ignore_changes = [ami, user_data]
+  }
+
   tags = {
-    Name = "${var.project_name}-standalone-web"
+    Name   = local.standalone_name
+    Backup = "daily" # Picked up by backup.tf when enable_backups = true
   }
 }
 
-# Static Elastic IP attached to the standalone web server
+# Static Elastic IP for the standalone server (Hostinger "A" record points here)
 resource "aws_eip" "web" {
-  instance = aws_instance.web.id
+  count = local.run_standalone ? 1 : 0
+
+  instance = aws_instance.web[0].id
   domain   = "vpc"
 
   tags = {
@@ -72,148 +100,214 @@ resource "aws_eip" "web" {
   }
 }
 
+# The resources above used to have no count. These blocks tell Terraform the
+# existing server and IP are the same objects, so nothing is recreated.
+moved {
+  from = aws_instance.web
+  to   = aws_instance.web[0]
+}
+
+moved {
+  from = aws_eip.web
+  to   = aws_eip.web[0]
+}
+
 # ==============================================================================
-# 🏢 PROFESSIONAL PRODUCTION SETUP (ALB, TARGET GROUP, ASG & LAUNCH TEMPLATE):
+# ENTERPRISE MODE (architecture_mode = "enterprise")
 # ==============================================================================
-# In an enterprise production architecture:
-# 1. We NEVER run a single snowflake EC2 instance with an Elastic IP (Single Point of Failure).
-# 2. An Application Load Balancer distributes incoming traffic across multiple Availability Zones.
-# 3. An Auto Scaling Group automatically heals failed instances and scales with traffic demand.
-# 4. Instances are 100% stateless workers that connect to a decoupled Amazon RDS MySQL.
+# ALB spreads traffic across 2 AZs; the Auto Scaling Group replaces unhealthy
+# servers and adds/removes servers with CPU load. Servers are stateless: data in
+# RDS, media in S3, app code pulled from the artifacts bucket at boot.
 #
-# Below, these resources are COMMENTED OUT for standalone single-instance mode:
-# ==============================================================================
+# Cost trade-off kept on purpose: servers sit in PUBLIC subnets (locked down so
+# only the ALB can reach port 80) instead of private subnets + NAT gateway,
+# which would add ~$33-45/month per NAT.
 
 # ------------------------------------------------------------------------------
-# ALB Target Group [COMMENTED OUT FOR STANDALONE]
+# ALB Target Group (health checked on /health.html)
 # ------------------------------------------------------------------------------
-# resource "aws_lb_target_group" "web" {
-#   name        = "${var.project_name}-web-tg"
-#   port        = 80
-#   protocol    = "HTTP"
-#   vpc_id      = aws_vpc.main.id
-#   target_type = "instance"
-#
-#   health_check {
-#     enabled             = true
-#     path                = "/health.html"
-#     port                = "traffic-port"
-#     protocol            = "HTTP"
-#     matcher             = "200"
-#     interval            = 15
-#     timeout             = 5
-#     healthy_threshold   = 2
-#     unhealthy_threshold = 3
-#   }
-#
-#   tags = {
-#     Name = "${var.project_name}-web-tg"
-#   }
-# }
+resource "aws_lb_target_group" "web" {
+  count = local.run_fleet ? 1 : 0
+
+  name        = "${var.project_name}-web-tg"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "instance"
+
+  health_check {
+    enabled             = true
+    path                = "/health.html"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 15
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+  }
+
+  tags = {
+    Name = "${var.project_name}-web-tg"
+  }
+}
 
 # ------------------------------------------------------------------------------
-# Application Load Balancer [COMMENTED OUT FOR STANDALONE]
+# Application Load Balancer (internet-facing, 2 AZs)
 # ------------------------------------------------------------------------------
-# resource "aws_lb" "main" {
-#   name               = "${var.project_name}-alb"
-#   internal           = false
-#   load_balancer_type = "application"
-#   security_groups    = [aws_security_group.alb.id]
-#   subnets            = [aws_subnet.public_1.id, aws_subnet.public_2.id]
-#
-#   enable_deletion_protection = false
-#
-#   tags = {
-#     Name = "${var.project_name}-alb"
-#   }
-# }
+resource "aws_lb" "main" {
+  count = local.run_fleet ? 1 : 0
+
+  name               = "${var.project_name}-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = [aws_subnet.public_1.id, aws_subnet.public_2.id]
+
+  drop_invalid_header_fields = true  # Rejects malformed headers (request smuggling defence)
+  enable_deletion_protection = false # Must stay false so a downgrade can remove the ALB
+
+  tags = {
+    Name = "${var.project_name}-alb"
+  }
+}
 
 # ------------------------------------------------------------------------------
-# ALB HTTP:80 Listener (Auto-Redirect to HTTPS:443) [COMMENTED OUT FOR STANDALONE]
+# ALB HTTP:80 Listener (301 redirect to HTTPS:443)
 # ------------------------------------------------------------------------------
-# resource "aws_lb_listener" "http" {
-#   load_balancer_arn = aws_lb.main.arn
-#   port              = 80
-#   protocol          = "HTTP"
-#
-#   default_action {
-#     type = "redirect"
-#
-#     redirect {
-#       port        = "443"
-#       protocol    = "HTTPS"
-#       status_code = "HTTP_301"
-#     }
-#   }
-# }
+resource "aws_lb_listener" "http" {
+  count = local.run_fleet ? 1 : 0
+
+  load_balancer_arn = aws_lb.main[0].arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+}
 
 # ------------------------------------------------------------------------------
-# EC2 Launch Template [COMMENTED OUT FOR STANDALONE]
+# EC2 Launch Template (blueprint for every server in the fleet)
 # ------------------------------------------------------------------------------
-# resource "aws_launch_template" "web" {
-#   name_prefix   = "${var.project_name}-lt-"
-#   image_id      = data.aws_ami.ubuntu.id
-#   instance_type = var.instance_type
-#
-#   iam_instance_profile {
-#     name = aws_iam_instance_profile.ec2.name
-#   }
-#
-#   network_interfaces {
-#     associate_public_ip_address = true
-#     security_groups             = [aws_security_group.web.id]
-#   }
-#
-#   user_data = base64encode(<<-EOF
-# #!/bin/bash
-# export DB_NAME="${var.db_name}"
-# export DB_USER="${var.db_username}"
-# export DB_PASS="${var.db_password}"
-# export DB_HOST="${aws_db_instance.wordpress.address}"
-# export DOMAIN_NAME="${var.domain_name}"
-#
-# ${file("${path.module}/install.sh")}
-# EOF
-#   )
-#
-#   tag_specifications {
-#     resource_type = "instance"
-#     tags = {
-#       Name = "${var.project_name}-web-server"
-#     }
-#   }
-#
-#   lifecycle {
-#     create_before_destroy = true
-#   }
-# }
+resource "aws_launch_template" "web" {
+  count = local.run_fleet ? 1 : 0
+
+  name_prefix            = "${var.project_name}-lt-"
+  image_id               = data.aws_ami.ubuntu.id
+  instance_type          = var.instance_type
+  update_default_version = true
+
+  iam_instance_profile {
+    name = aws_iam_instance_profile.ec2.name
+  }
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required" # IMDSv2 only
+  }
+
+  # Encrypted gp3 root disk
+  block_device_mappings {
+    device_name = data.aws_ami.ubuntu.root_device_name
+
+    ebs {
+      volume_size           = 10
+      volume_type           = "gp3"
+      encrypted             = true
+      delete_on_termination = true
+    }
+  }
+
+  network_interfaces {
+    associate_public_ip_address = true
+    security_groups             = [aws_security_group.web.id]
+  }
+
+  user_data = base64encode(<<-EOF
+#!/bin/bash
+${local.boot_env}
+export DB_HOST="${aws_db_instance.wordpress[0].address}"
+
+${file("${path.module}/install.sh")}
+EOF
+  )
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "${var.project_name}-web-server"
+    }
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
 
 # ------------------------------------------------------------------------------
-# Multi-AZ Auto Scaling Group [COMMENTED OUT FOR STANDALONE]
+# Multi-AZ Auto Scaling Group
 # ------------------------------------------------------------------------------
-# resource "aws_autoscaling_group" "web" {
-#   name_prefix               = "${var.project_name}-asg-"
-#   vpc_zone_identifier       = [aws_subnet.public_1.id, aws_subnet.public_2.id]
-#   target_group_arns         = [aws_lb_target_group.web.arn]
-#   health_check_type         = "ELB"
-#   health_check_grace_period = 300
-#
-#   min_size         = var.asg_min_size
-#   desired_capacity = var.asg_desired_capacity
-#   max_size         = var.asg_max_size
-#
-#   launch_template {
-#     id      = aws_launch_template.web.id
-#     version = "$Latest"
-#   }
-#
-#   tag {
-#     key                 = "Name"
-#     value               = "${var.project_name}-web-asg"
-#     propagate_at_launch = true
-#   }
-#
-#   lifecycle {
-#     create_before_destroy = true
-#   }
-# }
+resource "aws_autoscaling_group" "web" {
+  count = local.run_fleet ? 1 : 0
+
+  name_prefix               = "${var.project_name}-asg-"
+  vpc_zone_identifier       = [aws_subnet.public_1.id, aws_subnet.public_2.id]
+  target_group_arns         = [aws_lb_target_group.web[0].arn]
+  health_check_type         = "ELB"
+  health_check_grace_period = 300
+
+  min_size         = var.asg_min_size
+  desired_capacity = var.asg_desired_capacity
+  max_size         = var.asg_max_size
+
+  launch_template {
+    id      = aws_launch_template.web[0].id
+    version = aws_launch_template.web[0].latest_version
+  }
+
+  # Any launch template change (new AMI, new install.sh) rolls the fleet
+  # gradually instead of leaving old servers running forever.
+  instance_refresh {
+    strategy = "Rolling"
+    preferences {
+      min_healthy_percentage = 50
+    }
+  }
+
+  tag {
+    key                 = "Name"
+    value               = "${var.project_name}-web-asg"
+    propagate_at_launch = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+    # The scaling policy changes desired_capacity at runtime; don't fight it.
+    ignore_changes = [desired_capacity]
+  }
+}
+
+# ------------------------------------------------------------------------------
+# Target Tracking Scaling Policy (keep average CPU near var.asg_cpu_target)
+# ------------------------------------------------------------------------------
+resource "aws_autoscaling_policy" "cpu" {
+  count = local.run_fleet ? 1 : 0
+
+  name                   = "${var.project_name}-cpu-target-tracking"
+  autoscaling_group_name = aws_autoscaling_group.web[0].name
+  policy_type            = "TargetTrackingScaling"
+
+  target_tracking_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ASGAverageCPUUtilization"
+    }
+    target_value = var.asg_cpu_target
+  }
+}

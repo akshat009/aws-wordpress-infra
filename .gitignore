@@ -36,3 +36,9 @@ Thumbs.db
 # Local discussion & architecture notes (kept locally only, never pushed to GitHub)
 notes/
 
+
+# Personal interview preparation (kept locally only)
+interview-prep/
+
+# Multi-cloud reference guide (kept locally only)
+multi-cloud/

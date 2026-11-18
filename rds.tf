@@ -1,78 +1,85 @@
 # ==============================================================================
 # File: rds.tf
-# Tier: Step 4 - Decoupled Managed Relational Database (Amazon RDS MySQL)
-# Description: Provisions an isolated Amazon RDS MySQL 8.0 instance residing
-#              in private subnets across multiple Availability Zones with
-#              zero public ingress, automatic daily backups, and storage autoscaling.
-# ==============================================================================
-
-# ==============================================================================
-# 🏢 PROFESSIONAL PRODUCTION SETUP:
-# In an enterprise/production setup, the database MUST be decoupled into a managed
-# Amazon RDS instance residing in isolated private subnets across multiple AZs.
-# This guarantees:
-# 1. Stateless Compute: Web servers can crash, restart, or scale without risking data loss.
-# 2. Automated Backups & Point-in-time Recovery managed by AWS.
-# 3. High Availability: Multi-AZ standby replica ready for automatic failover.
-# 4. Storage Autoscaling: DB disk expands automatically as WordPress grows.
-# 5. Fault Isolation: Memory leaks or CPU spikes in PHP cannot kill the database process.
+# Tier: Managed Database (Amazon RDS MySQL)
+# Description: RDS MySQL in private subnets across 2 AZs, no public access,
+#              encrypted, with automated backups. Exists when
+#              architecture_mode is "migrating" or "enterprise" (local.run_rds).
 #
-# 💡 STANDALONE / BUDGET MODE:
-# For a single-server standalone setup, this RDS resource is COMMENTED OUT to save
-# cost. WordPress will connect to a local MySQL server (localhost) running directly
-# inside the EC2 instance.
+# In "standalone" mode WordPress uses MySQL on the EC2 itself (localhost).
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# 1. DB Subnet Group (Multi-AZ Private Placement) [COMMENTED OUT FOR STANDALONE]
+# 1. DB Subnet Group (private subnets in 2 AZs)
 # ------------------------------------------------------------------------------
-# resource "aws_db_subnet_group" "main" {
-#   name        = "${var.project_name}-db-subnet-group"
-#   description = "Private database subnet group spanning Availability Zones ap-south-1a and ap-south-1b"
-#   subnet_ids  = [aws_subnet.private_1.id, aws_subnet.private_2.id]
-#
-#   tags = {
-#     Name = "${var.project_name}-db-subnet-group"
-#   }
-# }
+resource "aws_db_subnet_group" "main" {
+  count = local.run_rds ? 1 : 0
+
+  name        = "${var.project_name}-db-subnet-group"
+  description = "Private database subnet group spanning Availability Zones ap-south-1a and ap-south-1b"
+  subnet_ids  = [aws_subnet.private_1.id, aws_subnet.private_2.id]
+
+  tags = {
+    Name = "${var.project_name}-db-subnet-group"
+  }
+}
+
+# Unique suffix for the final snapshot taken when RDS is deleted (downgrade).
+# Regenerated each time RDS is created, so snapshot names never collide.
+resource "random_id" "db_final_snapshot" {
+  count = local.run_rds ? 1 : 0
+
+  byte_length = 4
+}
 
 # ------------------------------------------------------------------------------
-# 2. Amazon RDS MySQL 8.0 Instance [COMMENTED OUT FOR STANDALONE]
+# 2. Amazon RDS MySQL Instance
 # ------------------------------------------------------------------------------
-# resource "aws_db_instance" "wordpress" {
-#   identifier = "${var.project_name}-db"
-#
-#   # Engine & Version
-#   engine         = "mysql"
-#   engine_version = "8.0" # AWS automatically assigns latest minor version (e.g. 8.0.36)
-#
-#   # Hardware Capacity & Storage
-#   instance_class        = var.db_instance_class    # "db.t3.micro" (AWS Free Tier eligible)
-#   allocated_storage     = var.db_allocated_storage # 20 GB (Free Tier limit)
-#   max_allocated_storage = 50                       # Automatically scale storage up to 50 GB if disk fills
-#   storage_type          = "gp3"                    # General Purpose SSD with baseline 3,000 IOPS
-#
-#   # Database Credentials & Initial Schema
-#   db_name  = var.db_name
-#   username = var.db_username
-#   password = var.db_password
-#
-#   # Network & Security Tier Placement
-#   db_subnet_group_name   = aws_db_subnet_group.main.name
-#   vpc_security_group_ids = [aws_security_group.db.id] # Chained strictly to web-sg (Port 3306)
-#   publicly_accessible    = false                      # CRITICAL: Zero internet access. Unreachable from outside VPC.
-#
-#   # High Availability & Backups
-#   multi_az                = false         # Single-AZ for lab cost optimization
-#   backup_retention_period = 1             # Retain automated daily snapshots for 1 day
-#   backup_window           = "03:00-04:00" # Daily snapshot window (UTC)
-#   maintenance_window      = "Sun:04:30-Sun:05:30"
-#
-#   # Lab Teardown Convenience
-#   skip_final_snapshot = true  # Allows clean terraform destroy without blocking on final snapshot creation
-#   deletion_protection = false # Prevents accidental terraform destroy block
-#
-#   tags = {
-#     Name = "${var.project_name}-rds"
-#   }
-# }
+resource "aws_db_instance" "wordpress" {
+  count = local.run_rds ? 1 : 0
+
+  identifier = "${var.project_name}-db"
+
+  # MySQL 8.4 LTS. RDS MySQL 8.0 left standard support on 31 July 2026; new 8.0
+  # instances would be billed for RDS Extended Support (far more than the
+  # instance itself on a db.t3.micro).
+  engine         = "mysql"
+  engine_version = "8.4"
+
+  # Never auto-enrol in paid Extended Support; plan the major upgrade instead.
+  engine_lifecycle_support = "open-source-rds-extended-support-disabled"
+
+  # Capacity & storage
+  instance_class        = var.db_instance_class
+  allocated_storage     = var.db_allocated_storage
+  max_allocated_storage = 50    # Storage autoscaling ceiling
+  storage_type          = "gp3" # Baseline 3,000 IOPS
+  storage_encrypted     = true  # Encryption at rest (AWS managed KMS key)
+
+  # Credentials: password generated in secrets.tf, never in code
+  db_name  = var.db_name
+  username = var.db_username
+  password = random_password.db.result
+
+  # Network placement: private subnets, reachable only from web-sg on 3306
+  db_subnet_group_name   = aws_db_subnet_group.main[0].name
+  vpc_security_group_ids = [aws_security_group.db.id]
+  publicly_accessible    = false
+
+  # Availability & backups
+  multi_az                   = var.rds_multi_az
+  backup_retention_period    = var.rds_backup_retention_days
+  backup_window              = "20:30-21:30"         # UTC = 02:00-03:00 IST
+  maintenance_window         = "Sun:21:45-Sun:22:45" # UTC, after the backup window
+  copy_tags_to_snapshot      = true
+  auto_minor_version_upgrade = true
+
+  # Deletion safety: a final snapshot is always taken when RDS is deleted
+  deletion_protection       = var.rds_deletion_protection
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "${var.project_name}-db-final-${random_id.db_final_snapshot[0].hex}"
+
+  tags = {
+    Name   = "${var.project_name}-rds"
+    Backup = "daily" # Picked up by backup.tf when enable_backups = true
+  }
+}

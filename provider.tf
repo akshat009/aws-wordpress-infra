@@ -1,36 +1,40 @@
 # ==============================================================================
 # File: provider.tf
-# Tier: Step 1 - Foundation & Backend Configuration
-# Description: Configures the Terraform binary requirements, AWS provider,
-#              remote S3 state storage, and DynamoDB distributed locking.
+# Tier: Foundation & Backend Configuration
+# Description: Terraform version requirements, providers, remote S3 state
+#              storage and DynamoDB state locking.
 # ==============================================================================
 
 terraform {
-  # Minimum required Terraform CLI version to ensure HCL2 feature compatibility
+  # Minimum Terraform CLI version (moved blocks, preconditions, one()).
   required_version = ">= 1.5.0"
 
-  # Official HashiCorp AWS Provider declaration with semantic version constraint (~> 5.0)
-  # This allows non-breaking minor/patch updates within v5.x while preventing accidental v6.x breaking upgrades.
   required_providers {
+    # Official AWS provider; "~> 5.0" allows 5.x updates but blocks breaking 6.x.
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+
+    # Generates the database password so it never lives in code (see secrets.tf).
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 
   # ----------------------------------------------------------------------------
-  # Remote State Storage & Distributed Concurrency Lock
+  # Remote State Storage & Distributed Lock (created once, by hand, on Day 0)
   # ----------------------------------------------------------------------------
-  # Why Remote S3 State over Local Disk?
-  # 1. Team Collaboration: Multiple developers/runners read the single source of truth.
-  # 2. Secret Protection: State file contains plain-text attributes; encrypted at rest via AES256.
-  # 3. DynamoDB State Lock: Prevents two simultaneous 'apply' operations from corrupting state.
+  # 1. Team collaboration: every runner reads one source of truth.
+  # 2. Secret protection: state holds sensitive values; encrypted at rest.
+  # 3. DynamoDB lock: stops two applies from corrupting state at the same time.
   backend "s3" {
-    bucket         = "wp-lab-tfstate-538820337783" # Dedicated private S3 bucket created in Phase 10
-    key            = "prod/terraform.tfstate"      # Remote object path inside the S3 bucket
-    region         = "ap-south-1"                  # AWS Mumbai region
-    dynamodb_table = "wp-lab-tf-locks"             # DynamoDB table holding active execution locks (LockID)
-    encrypt        = true                          # Enforces Server-Side Encryption (SSE-S3 / AES256)
+    bucket         = "wp-lab-tfstate-538820337783"
+    key            = "prod/terraform.tfstate"
+    region         = "ap-south-1"
+    dynamodb_table = "wp-lab-tf-locks"
+    encrypt        = true
   }
 }
 
@@ -38,15 +42,14 @@ terraform {
 # AWS Provider Configuration
 # ------------------------------------------------------------------------------
 provider "aws" {
-  region = var.aws_region # Defaults to ap-south-1 (Mumbai)
+  region = var.aws_region
 
-  # Default Tags automatically propagate to EVERY single resource managed by this provider.
-  # Crucial for Phase 11 cost allocation billing tags and AWS Cost Explorer grouping.
+  # Applied to every resource: cost allocation and "who owns this" in one place.
   default_tags {
     tags = {
-      Project     = var.project_name # "wp-lab"
-      Environment = var.environment  # "lab"
-      ManagedBy   = "Terraform"      # Flags resource as automated IaC (never manually edit in console)
+      Project     = var.project_name
+      Environment = var.environment
+      ManagedBy   = "Terraform"
     }
   }
 }
