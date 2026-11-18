@@ -1,0 +1,100 @@
+name: "Server Script Tests"
+
+# Tests the scripts that run ON the web server, using a real Nginx + PHP-FPM on
+# the GitHub runner. No AWS access, no cost; runs on PRs that touch them.
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/scripts/**"
+      - ".github/workflows/scripts-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  nginx-site:
+    name: "nginx-site.sh (with and without ALB)"
+    runs-on: ubuntu-latest
+    env:
+      DOMAIN: test.example
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Nginx + PHP-FPM (like the real server)
+        run: |
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nginx php-fpm
+          sudo systemctl start nginx
+          ls /run/php/
+          echo '<?php echo "wordpress-ok";' | sudo tee /var/www/html/index.php >/dev/null
+
+      # helper: check <expected code> <curl args...>
+      - name: Write test helper
+        run: |
+          cat > /tmp/check.sh <<'EOF'
+          #!/bin/bash
+          want="$1"; shift
+          got=$(curl -s -o /tmp/body -w "%{http_code}" "$@" || echo 000)
+          if [ "$got" = "$want" ]; then
+            echo "PASS  $want  curl $*"
+          else
+            echo "FAIL  expected $want, got $got  curl $*"; cat /tmp/body; exit 1
+          fi
+          EOF
+          chmod +x /tmp/check.sh
+
+      - name: "Case 1: no certificate (fresh server / ALB handles HTTPS)"
+        run: |
+          sudo bash .github/scripts/nginx-site.sh "$DOMAIN"
+          /tmp/check.sh 200 http://127.0.0.1/health.html
+          /tmp/check.sh 200 http://127.0.0.1/                                  # no redirect without a cert
+          grep -q wordpress-ok /tmp/body && echo "PASS  PHP served"
+          /tmp/check.sh 200 -H "X-Forwarded-Proto: https" http://127.0.0.1/    # through the ALB
+
+      - name: "Case 2: Let's Encrypt certificate present (live server today)"
+        run: |
+          sudo mkdir -p "/etc/letsencrypt/live/$DOMAIN"
+          sudo openssl req -x509 -nodes -newkey rsa:2048 -days 1 -subj "/CN=$DOMAIN" \
+            -keyout "/etc/letsencrypt/live/$DOMAIN/privkey.pem" \
+            -out "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" 2>/dev/null
+          sudo bash .github/scripts/nginx-site.sh "$DOMAIN"
+
+          # ALB health check: plain HTTP, Host = IP, no X-Forwarded-Proto -> must be 200
+          /tmp/check.sh 200 http://127.0.0.1/health.html
+          # Visitor through the ALB (ALB terminated HTTPS) -> served, no loop
+          /tmp/check.sh 200 -H "X-Forwarded-Proto: https" -H "Host: $DOMAIN" http://127.0.0.1/
+          grep -q wordpress-ok /tmp/body && echo "PASS  PHP served behind ALB"
+          # Direct HTTP visitor on the Elastic IP -> 301 to HTTPS
+          /tmp/check.sh 301 -H "Host: $DOMAIN" http://127.0.0.1/some/page
+          grep -qi "^location: https://$DOMAIN/some/page" <(curl -sI -H "Host: $DOMAIN" http://127.0.0.1/some/page) && echo "PASS  redirect target"
+          # Let's Encrypt renewal challenge must not be redirected (200 via the
+          # WordPress fallback here; certbot adds its own location when renewing)
+          /tmp/check.sh 200 -H "Host: $DOMAIN" http://127.0.0.1/.well-known/acme-challenge/token
+          # Direct HTTPS visitor -> served with the certificate
+          /tmp/check.sh 200 -k --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/"
+
+      - name: "Case 3: running it again changes nothing (idempotent)"
+        run: |
+          sudo cp /etc/nginx/sites-available/default /tmp/before
+          sudo bash .github/scripts/nginx-site.sh "$DOMAIN"
+          sudo diff /tmp/before /etc/nginx/sites-available/default && echo "PASS  same config"
+          /tmp/check.sh 200 http://127.0.0.1/health.html
+
+      - name: "Case 4: a broken config is rolled back"
+        run: |
+          sudo cp /etc/nginx/sites-available/default /tmp/good
+          # Break it: a certificate file that Nginx can't load
+          echo "not a key" | sudo tee "/etc/letsencrypt/live/$DOMAIN/privkey.pem" >/dev/null
+          if sudo bash .github/scripts/nginx-site.sh "$DOMAIN"; then
+            echo "FAIL  script should have failed"; exit 1
+          fi
+          sudo diff /tmp/good /etc/nginx/sites-available/default && echo "PASS  previous config restored"
+          /tmp/check.sh 200 http://127.0.0.1/health.html
