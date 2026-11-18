@@ -44,6 +44,15 @@ mock_provider "aws" {
 }
 mock_provider "random" {}
 
+# monitoring.tf imports the pre-existing SNS topic; mock providers can't import,
+# so the test supplies the imported topic's values directly.
+override_resource {
+  target = aws_sns_topic.alerts
+  values = {
+    arn = "arn:aws:sns:ap-south-1:123456789012:wp-lab-alerts"
+  }
+}
+
 run "standalone" {
   command = apply
   variables { architecture_mode = "standalone" }
