@@ -43,7 +43,8 @@ Servers sit in public subnets, locked down by security groups, instead of privat
 
 ```text
 .
-├── provider.tf          Terraform + provider versions, S3 backend with DynamoDB lock
+├── provider.tf          Terraform + provider versions, S3 backend with DynamoDB lock (values passed at init)
+├── backend.hcl.example  terraform.tfvars.example   Laptop-only settings templates (copies are git-ignored)
 ├── variables.tf         All settings. architecture_mode switch is at the top
 ├── locals.tf            Turns architecture_mode into run_standalone / run_rds / run_fleet flags
 ├── vpc.tf               VPC, 2 public + 2 private subnets, IGW, route tables
@@ -79,16 +80,31 @@ Servers sit in public subnets, locked down by security groups, instead of privat
 
 **Day 0 (AWS console, once):** S3 state bucket, DynamoDB lock table (`LockID`), GitHub OIDC provider and `GitHubActionsTerraformRole`. Terraform can't create its own backend.
 
-**GitHub repository settings:**
+**GitHub repository settings (Day 0, before the first workflow run):**
+
+#### Repository variables
+
+Settings → Secrets and variables → Actions → **Variables**. **Required**: every workflow checks them first (`.github/scripts/check-vars.sh`) and stops with a clear error if one is missing. **The code has no project-specific values or fallbacks**: CI passes these to Terraform (`TF_VAR_aws_region`, `TF_VAR_project_name`, `TF_VAR_domain_name`, and `-backend-config` for the state), so Terraform, the workflows and the scripts always use the same values.
+
+| Variable | Value | Used for |
+| :--- | :--- | :--- |
+| `AWS_REGION` | e.g. `ap-south-1` | Region of every resource and every AWS CLI call |
+| `PROJECT_NAME` | e.g. `wp-lab` | Prefix of every resource name; workflows find servers, buckets, RDS and the SSM password (`/<PROJECT_NAME>/db/password`) by it |
+| `DOMAIN_NAME` | e.g. `lab.asaxenadev.com` | Site address: certificate, `wp-config.php`, smoke tests |
+| `AWS_ROLE_ARN` | `arn:aws:iam::<ACCOUNT_ID>:role/GitHubActionsTerraformRole` | The role GitHub Actions assumes through OIDC |
+| `TF_STATE_BUCKET` | e.g. `wp-lab-tfstate-<ACCOUNT_ID>` | Terraform state bucket (Day 0). Must be in `AWS_REGION` |
+| `TF_LOCK_TABLE` | e.g. `wp-lab-tf-locks` | DynamoDB lock table (Day 0, partition key `LockID`) |
+
+> **Choose `AWS_REGION` and `PROJECT_NAME` once, at Day 0.** Changing either later means Terraform renames or moves **every** resource (a rebuild). Name the state bucket and lock table to match (`<PROJECT_NAME>-tfstate-<ACCOUNT_ID>`, `<PROJECT_NAME>-tf-locks`).
+
+#### Secret and environment
 
 | Setting | Where | Value |
 | :--- | :--- | :--- |
-| `AWS_ROLE_ARN` | Settings → Secrets and variables → Actions → Variables | `arn:aws:iam::<ACCOUNT_ID>:role/GitHubActionsTerraformRole` |
-| `DOMAIN_NAME` | same | e.g. `lab.asaxenadev.com` |
-| `ALERT_EMAIL` | same | Email for alarms and budget alerts |
+| `ALERT_EMAIL` | Settings → Secrets and variables → Actions → **Secrets** (masked as `***` in logs; a variable would print it publicly) | Email for alarms, budget alerts and Let's Encrypt |
 | Approval gate | Settings → Environments → `production` → Required reviewers | Add yourself |
 
-Workflows fall back to the current account and domain if the variables aren't set. Without `ALERT_EMAIL` no email subscription is created. After the first apply, AWS sends a confirmation email that you must click.
+Without `ALERT_EMAIL` no email subscription is created. After the first apply, AWS sends a confirmation email that you must click.
 
 ---
 
@@ -172,6 +188,15 @@ A new standalone server always installs local MySQL, but points WordPress at RDS
 terraform init -backend=false
 terraform test        # mocked AWS: checks every mode builds the right resources
 terraform fmt -check -recursive
+```
+
+Tests need no AWS account and no settings (they pin their own values). To run a real `plan` on a laptop (CI normally does this), copy the two example files and fill them in; both copies are git-ignored:
+
+```bash
+cp backend.hcl.example backend.hcl            # state bucket, region, lock table
+cp terraform.tfvars.example terraform.tfvars  # aws_region, project_name, domain_name
+terraform init -backend-config=backend.hcl
+terraform plan
 ```
 
 ---

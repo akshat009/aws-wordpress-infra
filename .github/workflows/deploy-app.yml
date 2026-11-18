@@ -30,10 +30,11 @@ defaults:
     shell: bash
 
 env:
-  AWS_REGION: ap-south-1
-  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::538820337783:role/GitHubActionsTerraformRole' }}
-  DOMAIN_NAME: ${{ vars.DOMAIN_NAME || 'lab.asaxenadev.com' }}
-  PROJECT_NAME: wp-lab
+  # All from Settings > Secrets and variables > Actions > Variables (README: Repository variables)
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+  PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+  DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
 
 jobs:
   deploy:
@@ -44,6 +45,9 @@ jobs:
       # 1. Checkout repository code
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Check Repository Variables
+        run: bash .github/scripts/check-vars.sh AWS_REGION AWS_ROLE_ARN PROJECT_NAME DOMAIN_NAME
 
       # 2. Authenticate to AWS via OIDC (no static keys)
       - name: Configure AWS Credentials via OIDC

@@ -12,14 +12,15 @@ set -euo pipefail
 #   - RDS:         DB user + password read from SSM Parameter Store
 #
 # Usage:
-#   sudo ./migrate-db.sh local-to-rds <RDS_HOST> [SSM_PARAM] [AWS_REGION]
-#   sudo ./migrate-db.sh rds-to-local <RDS_HOST> [SSM_PARAM] [AWS_REGION]
+#   sudo ./migrate-db.sh local-to-rds <RDS_HOST> <SSM_PARAM> <AWS_REGION>
+#   sudo ./migrate-db.sh rds-to-local <RDS_HOST> <SSM_PARAM> <AWS_REGION>
+#   e.g. SSM_PARAM = /<project>/db/password  (migrate-database.yml passes all four)
 # ==============================================================================
 
 DIRECTION="${1:-}"
 RDS_HOST="${2:-}"
-DB_PASSWORD_PARAM="${3:-/wp-lab/db/password}"
-AWS_REGION="${4:-ap-south-1}"
+DB_PASSWORD_PARAM="${3:-}"
+AWS_REGION="${4:-}"
 DB_NAME="${DB_NAME:-wordpress}"
 DB_USER="${DB_USER:-wpuser}"
 WP_CONFIG="/var/www/html/wp-config.php"
@@ -27,8 +28,8 @@ BACKUP_DIR="/root/migration-backups"
 
 RDS_HOST=$(echo "$RDS_HOST" | cut -d: -f1) # strip :3306 if present
 
-if [ -z "$DIRECTION" ] || [ -z "$RDS_HOST" ]; then
-    echo "Usage: sudo $0 <local-to-rds | rds-to-local> <rds-endpoint-hostname> [ssm-param] [region]"
+if [ -z "$DIRECTION" ] || [ -z "$RDS_HOST" ] || [ -z "$DB_PASSWORD_PARAM" ] || [ -z "$AWS_REGION" ]; then
+    echo "Usage: sudo $0 <local-to-rds | rds-to-local> <rds-endpoint-hostname> <ssm-param> <region>"
     exit 1
 fi
 if [ "$DIRECTION" != "local-to-rds" ] && [ "$DIRECTION" != "rds-to-local" ]; then

@@ -27,7 +27,7 @@ output "app_endpoint" {
 }
 
 output "dns_instructions" {
-  description = "What the Hostinger DNS record for the site should be right now"
+  description = "What the DNS record for the site should be right now (set it at your DNS provider)"
   value = local.run_alb ? (
     "CNAME  ${split(".", var.domain_name)[0]}  ->  ${one(aws_lb.main[*].dns_name)}"
     ) : (
@@ -175,7 +175,7 @@ output "acm_certificate_arn" {
 }
 
 output "acm_dns_validation_records" {
-  description = "CNAME record(s) to add in Hostinger so ACM can issue the certificate"
+  description = "CNAME record(s) to add at your DNS provider so ACM can issue the certificate"
   value = local.request_certificate ? [
     for dvo in aws_acm_certificate.cert[0].domain_validation_options : {
       name   = dvo.resource_record_name

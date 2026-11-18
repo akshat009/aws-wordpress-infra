@@ -9,7 +9,7 @@
 #
 # Two-stage flow (avoids the apply hanging on DNS validation, see notes/15):
 #   "migrating"  -> certificate requested; add the CNAME from the
-#                   acm_dns_validation_records output to Hostinger.
+#                   acm_dns_validation_records output to your DNS provider.
 #   "enterprise" -> validation completes quickly, HTTPS listener created.
 # ==============================================================================
 

@@ -24,17 +24,20 @@ terraform {
   }
 
   # ----------------------------------------------------------------------------
-  # Remote State Storage & Distributed Lock (created once, by hand, on Day 0)
+  # Remote State Storage & Distributed Lock (bucket + table created on Day 0)
   # ----------------------------------------------------------------------------
   # 1. Team collaboration: every runner reads one source of truth.
   # 2. Secret protection: state holds sensitive values; encrypted at rest.
   # 3. DynamoDB lock: stops two applies from corrupting state at the same time.
+  #
+  # Partial configuration: bucket, region and dynamodb_table are NOT in code
+  # (a backend block can't use variables). They are passed at init time:
+  #   CI    : terraform.yml, from the TF_STATE_BUCKET / TF_LOCK_TABLE / AWS_REGION
+  #           repository variables
+  #   Laptop: terraform init -backend-config=backend.hcl  (see backend.hcl.example)
   backend "s3" {
-    bucket         = "wp-lab-tfstate-538820337783"
-    key            = "prod/terraform.tfstate"
-    region         = "ap-south-1"
-    dynamodb_table = "wp-lab-tf-locks"
-    encrypt        = true
+    key     = "prod/terraform.tfstate"
+    encrypt = true
   }
 }
 
