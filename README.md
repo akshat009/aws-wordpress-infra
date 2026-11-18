@@ -62,7 +62,7 @@ Servers sit in public subnets, locked down by security groups, instead of privat
 ├── install.sh           First-boot setup for every server (reads password from SSM)
 ├── tests/               Offline terraform tests for every mode (mocked AWS)
 ├── scripts/migrate-db.sh                 Local MySQL ⇄ RDS migration (runs via SSM); backs up both sides to S3 first
-├── .github/scripts/configure-domain.py   Rebuilds wp-config.php during deploys
+├── .github/scripts/configure-domain.py   Deploy-time check of wp-config.php: only adds a missing block, never rewrites it
 ├── .github/scripts/nginx-site.sh         Nginx site for the single server: works directly and behind the ALB
 ├── .github/scripts/ssm-run.sh            Runs commands on a server through SSM and waits (used by workflows)
 ├── .github/workflows/

@@ -202,3 +202,69 @@ jobs:
           echo "PASS  RDS untouched"
           sudo diff /tmp/wpconfig-before /var/www/html/wp-config.php || { echo "FAIL  wp-config untouched"; exit 1; }
           echo "PASS  wp-config untouched"
+
+  configure-domain:
+    name: "configure-domain.py (never rewrites wp-config.php)"
+    runs-on: ubuntu-latest
+    env:
+      WP_CONFIG: /tmp/wp/wp-config.php
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: "Case 1: full config with hand-added settings -> byte-for-byte unchanged"
+        run: |
+          mkdir -p /tmp/wp
+          cat > "$WP_CONFIG" <<'EOF'
+          <?php
+          define( 'DB_NAME', 'wordpress' );
+          define( 'DB_PASSWORD', 'keep-me' );
+          define( 'DB_HOST', 'my-rds.example.com' );
+          if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') { $_SERVER['HTTPS'] = 'on'; }
+          define('AS3CF_SETTINGS', serialize(array('provider' => 'aws', 'use-server-roles' => true, 'bucket' => 'hand-added-bucket', 'delivery-domain' => 'd123.cloudfront.net')));
+          define( 'MY_CUSTOM_SETTING', true );
+          require_once ABSPATH . 'wp-settings.php';
+          EOF
+          cp "$WP_CONFIG" /tmp/before.php
+          python3 .github/scripts/configure-domain.py
+          cmp /tmp/before.php "$WP_CONFIG" || { echo "FAIL  file changed"; exit 1; }
+          echo "PASS  untouched (hand-added bucket, custom setting, DB settings kept)"
+          [ -z "$(ls /tmp/wp/*.bak-* 2>/dev/null)" ] || { echo "FAIL  backup made for no change"; exit 1; }
+          echo "PASS  no backup when nothing changes"
+
+      - name: "Case 2: old config missing both blocks -> only the blocks are added"
+        run: |
+          rm -f /tmp/wp/*
+          cat > "$WP_CONFIG" <<'EOF'
+          <?php
+          define( 'DB_NAME', 'wordpress' );
+          define( 'DB_PASSWORD', 'keep-me' );
+          define( 'MY_CUSTOM_SETTING', true );
+          require_once ABSPATH . 'wp-settings.php';
+          EOF
+          cp "$WP_CONFIG" /tmp/before.php
+          python3 .github/scripts/configure-domain.py
+          grep -q "HTTP_X_FORWARDED_PROTO" "$WP_CONFIG" || { echo "FAIL  proxy block missing"; exit 1; }
+          grep -q "AS3CF_SETTINGS" "$WP_CONFIG" || { echo "FAIL  offload block missing"; exit 1; }
+          echo "PASS  missing blocks added"
+          # every original line is still there, in order
+          diff <(cat /tmp/before.php) <(grep -Fx -f /tmp/before.php "$WP_CONFIG") || { echo "FAIL  original lines changed"; exit 1; }
+          echo "PASS  every original line kept"
+          ls /tmp/wp/wp-config.php.bak-* >/dev/null || { echo "FAIL  no backup"; exit 1; }
+          echo "PASS  backup written before the edit"
+          php -l "$WP_CONFIG" || { echo "FAIL  PHP syntax"; exit 1; }
+          echo "PASS  valid PHP"
+
+      - name: "Case 3: second run changes nothing (idempotent)"
+        run: |
+          cp "$WP_CONFIG" /tmp/after1.php
+          python3 .github/scripts/configure-domain.py
+          cmp /tmp/after1.php "$WP_CONFIG" || { echo "FAIL  second run changed the file"; exit 1; }
+          echo "PASS  idempotent"
+
+      - name: "Case 4: missing wp-config.php -> error, nothing created"
+        run: |
+          rm -f /tmp/wp/*
+          if python3 .github/scripts/configure-domain.py; then echo "FAIL  should have failed"; exit 1; fi
+          [ ! -e "$WP_CONFIG" ] || { echo "FAIL  created a config"; exit 1; }
+          echo "PASS  refused, nothing created"
