@@ -11,14 +11,8 @@
 # ------------------------------------------------------------------------------
 # 1. Alert topic + email subscription
 # ------------------------------------------------------------------------------
-# A topic with this name was created by hand in the console earlier (ClickOps
-# phase). Adopt it into Terraform instead of creating a duplicate: AWS rejects a
-# second CreateTopic with the same name but different tags. After the first
-# successful apply this block is a no-op and can be removed.
-import {
-  to = aws_sns_topic.alerts
-  id = "arn:aws:sns:${var.aws_region}:${data.aws_caller_identity.current.account_id}:${var.project_name}-alerts"
-}
+# The topic was first created by hand in the console and adopted into Terraform
+# with an import block (PR #18); the block was removed once the import was applied.
 
 resource "aws_sns_topic" "alerts" {
   name = "${var.project_name}-alerts"

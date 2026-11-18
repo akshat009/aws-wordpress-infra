@@ -44,22 +44,6 @@ mock_provider "aws" {
 }
 mock_provider "random" {}
 
-# monitoring.tf imports the pre-existing SNS topic; mock providers can't import,
-# so the test supplies the imported topic's values directly.
-override_resource {
-  target = aws_sns_topic.alerts
-  values = {
-    arn = "arn:aws:sns:ap-south-1:123456789012:wp-lab-alerts"
-  }
-}
-
-# Same for the imported zero-spend budget (budget.tf)
-override_resource {
-  target = aws_budgets_budget.zero_spend
-  values = {
-    id = "123456789012:My Zero-Spend Budget"
-  }
-}
 
 # Pin inputs that CI also passes as TF_VAR_* environment variables, so the tests
 # don't depend on repository settings (test-file values take precedence).
