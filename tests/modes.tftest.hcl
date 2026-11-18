@@ -83,8 +83,8 @@ run "standalone" {
     error_message = "alarms wrong in standalone"
   }
   assert {
-    condition     = length(aws_sns_topic_subscription.email) == 0 && length(aws_backup_plan.daily) == 0
-    error_message = "email sub / backups should be off by default"
+    condition     = length(aws_sns_topic_subscription.email) == 0 && length(aws_backup_plan.daily) == 1 && length(aws_backup_selection.tagged) == 1
+    error_message = "by default: no email subscription, daily backups ON"
   }
   assert {
     condition     = !strcontains(aws_instance.web[0].user_data, "SecureLabPass")
