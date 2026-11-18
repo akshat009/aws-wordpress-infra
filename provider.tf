@@ -6,8 +6,8 @@
 # ==============================================================================
 
 terraform {
-  # Minimum Terraform CLI version (moved blocks, preconditions, one()).
-  required_version = ">= 1.5.0"
+  # Minimum Terraform CLI version: 1.7 for import blocks with for_each (budget.tf).
+  required_version = ">= 1.7.0"
 
   required_providers {
     # Official AWS provider; "~> 5.0" allows 5.x updates but blocks breaking 6.x.

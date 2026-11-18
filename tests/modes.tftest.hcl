@@ -53,6 +53,14 @@ override_resource {
   }
 }
 
+# Same for the imported zero-spend budget (budget.tf)
+override_resource {
+  target = aws_budgets_budget.zero_spend
+  values = {
+    id = "123456789012:My Zero-Spend Budget"
+  }
+}
+
 # Pin inputs that CI also passes as TF_VAR_* environment variables, so the tests
 # don't depend on repository settings (test-file values take precedence).
 # Pinned so CI settings (TF_VAR_* from repo variables/secrets) can't change test results
@@ -225,7 +233,7 @@ run "alarms_and_budget_off" {
     enable_budget     = false
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.standalone_cpu_high) == 0 && length(aws_budgets_budget.monthly) == 0
+    condition     = length(aws_cloudwatch_metric_alarm.standalone_cpu_high) == 0 && length(aws_budgets_budget.monthly) == 0 && length(aws_budgets_budget.zero_spend) == 0
     error_message = "alarms and budget should be off"
   }
   assert {
